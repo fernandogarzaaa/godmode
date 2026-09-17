@@ -15,11 +15,11 @@ for (const f of [".github/workflows/ci.yml", ".github/workflows/auto-update.yml"
   const shas = { skein: "abc123def456" };
   let out = txt;
   for (const n of Object.keys(shas)) {
-    const re = new RegExp("(  " + n + ":\n(?:.*\n)*?    pin: )\\S+");
+    const re = new RegExp("(  " + n + ":\r?\n(?:.*\r?\n)*?    pin: )\\S+");
     if (!re.test(out)) throw new Error("no match for " + n);
     out = out.replace(re, "$1" + shas[n]);
   }
-  const m = out.match(/  skein:\n(?:.*\n)*?    pin: (\S+)/);
+  const m = out.match(/  skein:\r?\n(?:.*\r?\n)*?    pin: (\S+)/);
   if (m[1] !== "abc123def456") throw new Error("pin rewrite failed");
   console.log("pin-regex ok:", m[1]);
 }

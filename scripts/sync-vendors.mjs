@@ -13,7 +13,7 @@ const opt = (n) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : nu
 function readPins() {
   const txt = readFileSync(join(root, "vendors", "manifest.yaml"), "utf8");
   const pins = {};
-  for (const m of txt.matchAll(/^  (\S+):\n(?:.*\n)*?    pin: (\S+)/gm)) pins[m[1]] = m[2];
+  for (const m of txt.matchAll(/^  (\S+):\r?\n(?:.*\r?\n)*?    pin: (\S+)/gm)) pins[m[1]] = m[2];
   return pins;
 }
 if (args.includes("--check")) { console.log(JSON.stringify(readPins(), null, 2)); process.exit(0); }

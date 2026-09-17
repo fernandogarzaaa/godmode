@@ -90,7 +90,7 @@ jobs:
           const fs = require('fs');
           const changed = JSON.parse(process.env.CHANGED), shas = JSON.parse(process.env.SHAS);
           let txt = fs.readFileSync('vendors/manifest.yaml','utf8');
-          for (const n of changed) txt = txt.replace(new RegExp('(  '+n+':\\n(?:.*\\n)*?    pin: )\\S+'), '\$1'+shas[n]);
+          for (const n of changed) txt = txt.replace(new RegExp('(  '+n+':\\r?\\n(?:.*\\r?\\n)*?    pin: )\\S+'), '\$1'+shas[n]);
           fs.writeFileSync('vendors/manifest.yaml', txt);
           "
       - name: Rebuild dists

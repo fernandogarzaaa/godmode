@@ -13,11 +13,13 @@ target/
 __pycache__/
 # Standalone prebuilt outputs ARE committed.
 # `target/` ignores every dir named target; to re-include just the prebuilt
-# adam-mcp release binaries, unignore the dir chain, re-ignore the rest of the
-# cargo target tree, then unignore the two binaries (order matters).
+# adam-mcp release binaries, unignore the dir chain, re-ignore everything
+# inside release/, then unignore the two binaries (order matters — otherwise
+# cargo fingerprints/deps/build junk becomes committable and pollutes bot PRs).
 !vendors/adam/target/
 vendors/adam/target/*
 !vendors/adam/target/release/
+vendors/adam/target/release/*
 !vendors/adam/target/release/adam-mcp.exe
 !vendors/adam/target/release/adam-mcp
 !vendors/genesis/dist/

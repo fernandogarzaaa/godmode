@@ -16,7 +16,7 @@ import { ALL_DESCRIPTORS } from "../assurance/findings.js";
 import { VerifierAdapter } from "../assurance/verifier.js";
 import { SubprocessRunner } from "../evidence/runner.js";
 import { Ledger } from "../ledger/ledger.js";
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 const USAGE = `genesis ${VERSION} — universal evaluation & assurance for AI-native software
 
   Evaluation ("does it work?"):
@@ -763,6 +763,23 @@ async function cmdVerify(argv) {
         }
         const verification = verifyBundle(dir, keys);
         process.stdout.write(`bundle: ${verification.bundle_digest}\n`);
+        // Unsigned-tree check (v2 DIGEST covers the full bundle, not just the verdict).
+        try {
+            const { verifyEvidenceBundle } = await import("../eval/bundle.js");
+            const tree = verifyEvidenceBundle(dir);
+            process.stdout.write(`tree digest: ${tree.digest} (${tree.ok ? "match" : "MISMATCH"}; expected ${tree.expected})\n`);
+            if (tree.legacyExpected) {
+                const lm = tree.legacyDigest === tree.legacyExpected ? "match" : "MISMATCH";
+                process.stdout.write(`legacy verdict digest: ${tree.legacyDigest} (${lm})\n`);
+            }
+            if (!tree.ok) {
+                process.stdout.write("VERIFICATION FAILED\n");
+                return 1;
+            }
+        }
+        catch {
+            // Attestation-only bundles (no evaluation tree) skip the tree check.
+        }
         if (verification.checks.length === 0) {
             process.stdout.write("no attestations found — nothing to verify\n");
         }

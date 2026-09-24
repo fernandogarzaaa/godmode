@@ -8,8 +8,8 @@
  * evidence bundle.
  */
 import { createHash } from "node:crypto";
-import { canonicalize } from "../shared/canonical.js";
-import { redact } from "../shared/redact.js";
+import { canonicalize, hashCanonicalExcluding } from "../shared/canonical.js";
+import { redact, redactDeep } from "../shared/redact.js";
 import { SubprocessRunner } from "../evidence/runner.js";
 import { createEvaluator } from "./evaluators.js";
 import { createSubject } from "./subjects.js";
@@ -135,35 +135,76 @@ async function runArm(armId, subjectName, spec, dataset, evaluator, runner, repe
             }
             const duration_ms = Date.now() - s0;
             const t1 = new Date().toISOString();
+            const failed = isFailedExecution(out);
             const trial = {
                 trial_id, task_id: task.id, repetition: rep + 1, seed,
                 subject: subjectName, started_at: t0, ended_at: t1,
                 duration_ms, timed_out: out.timed_out, error: out.error,
-                output: redactUnknown(out.output),
+                output: truncateOutput(out.output),
             };
             trials.push(trial);
             let obs;
-            try {
-                obs = await evaluator.evaluate(task, out.output);
-            }
-            catch (error) {
+            if (failed) {
+                // Fail-closed: crashed / timed-out / nonzero-exit trials are UNJUDGED.
+                // Never send partial/stale output to the evaluator — it could still
+                // "pass" on a fragment and produce SUPPORTED from a failed execution.
                 obs = {
                     evaluator: evaluator.name, evaluator_kind: "deterministic",
-                    score: null, passed: null, details: { error: error.message },
+                    score: null, passed: null,
+                    details: {
+                        unjudged: true,
+                        reason: out.timed_out
+                            ? "subject timed out"
+                            : out.error ?? `subject failed (exit ${out.exit_code})`,
+                        exit_code: out.exit_code,
+                        timed_out: out.timed_out,
+                    },
                 };
+            }
+            else {
+                try {
+                    obs = await evaluator.evaluate(task, out.output);
+                }
+                catch (error) {
+                    obs = {
+                        evaluator: evaluator.name, evaluator_kind: "deterministic",
+                        score: null, passed: null, details: { error: error.message },
+                    };
+                }
             }
             const observation = { trial_id, task_id: task.id, ...obs };
             observations.push(observation);
-            const digest = createHash("sha256")
+            // Evidence digest binds the FULL record (trial + observation +
+            // provenance + timestamps), excluding only its own digest field.
+            // The old {trial_id, task_id, observation} digest is kept as
+            // legacy_digest for verification of historic bundles — computed first
+            // so the v2 digest binds it too. A verifier reproduces `digest` by
+            // hashing the stored record minus `digest` alone.
+            const legacyDigest = createHash("sha256")
                 .update(canonicalize({ trial_id, task_id: task.id, observation }))
                 .digest("hex");
-            evidence.push({
-                digest, source: `subject:${subjectName}|evaluator:${evaluator.name}`,
+            const evidenceBody = {
+                source: `subject:${subjectName}|evaluator:${evaluator.name}`,
                 timestamp: t1, task_id: task.id, trial_id,
-                observation, artifact_digest: null,
+                trial, observation, artifact_digest: null,
+                legacy_digest: legacyDigest,
                 provenance: {
                     subject: subject.describe(), evaluator: evaluator.describe(),
                     exit_code: out.exit_code, duration_ms, timed_out: out.timed_out,
+                    error: out.error,
+                },
+                confidence: null,
+            };
+            const digest = hashCanonicalExcluding(stripUndefined(evidenceBody), ["digest"]);
+            evidence.push({
+                digest, source: `subject:${subjectName}|evaluator:${evaluator.name}`,
+                timestamp: t1, task_id: task.id, trial_id,
+                trial, observation, artifact_digest: null,
+                legacy_digest: legacyDigest,
+                provenance: {
+                    subject: subject.describe(), evaluator: evaluator.describe(),
+                    exit_code: out.exit_code, duration_ms, timed_out: out.timed_out,
+                    error: out.error,
                 },
                 confidence: null,
             });
@@ -171,18 +212,74 @@ async function runArm(armId, subjectName, spec, dataset, evaluator, runner, repe
     }
     return { arm: armId, trials, observations, evidence, metrics: [], statistics: [] };
 }
-function redactUnknown(v) {
-    if (typeof v === "string")
-        return redact(v).slice(0, 20000);
+/** Legacy alias (kept for external callers): size-bounded output. */
+export function redactUnknown(v) {
+    return truncateOutput(v);
+}
+/** Fail-closed execution gate: any error/timeout/nonzero exit is failed. */
+export function isFailedExecution(out) {
+    if (out.timed_out)
+        return true;
+    if (out.error !== null)
+        return true;
+    if (out.exit_code !== null && out.exit_code !== 0)
+        return true;
+    return false;
+}
+const MAX_OUTPUT_CHARS = 20000;
+/**
+ * Size-bounded output carrier. Strings/JSON above the cap become a valid
+ * envelope {truncated, excerpt, byte_count, digest} instead of `[object
+ * Object]` (old JSON.parse(slice) fallback) — evidence is preserved and the
+ * full content stays addressable by digest.
+ */
+export function truncateOutput(v) {
+    if (typeof v === "string") {
+        const redacted = redact(v);
+        if (redacted.length <= MAX_OUTPUT_CHARS)
+            return redacted;
+        return {
+            truncated: true,
+            excerpt: redacted.slice(0, MAX_OUTPUT_CHARS),
+            byte_count: redacted.length,
+            digest: `sha256:${createHash("sha256").update(redacted).digest("hex")}`,
+        };
+    }
+    // Deep-redact structured output before measuring so the stored copy never
+    // carries secrets that string-level redaction would miss on nesting.
+    const cleaned = redactDeep(v);
     try {
-        const s = JSON.stringify(v);
-        if (s && s.length > 20000)
-            return JSON.parse(s.slice(0, 20000));
-        return v;
+        const s = JSON.stringify(cleaned);
+        if (!s || s.length <= MAX_OUTPUT_CHARS)
+            return cleaned;
+        return {
+            truncated: true,
+            excerpt: s.slice(0, MAX_OUTPUT_CHARS),
+            byte_count: s.length,
+            digest: `sha256:${createHash("sha256").update(s).digest("hex")}`,
+        };
     }
     catch {
-        return String(v).slice(0, 20000);
+        return String(v).slice(0, MAX_OUTPUT_CHARS);
     }
+}
+/**
+ * Recursively drop `undefined` (canonical JSON rejects it — stringify would
+ * silently drop those fields and produce colliding digests). Keeps nulls.
+ */
+export function stripUndefined(v) {
+    if (Array.isArray(v))
+        return v.map((x) => stripUndefined(x));
+    if (v && typeof v === "object") {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) {
+            if (val === undefined)
+                continue;
+            out[k] = stripUndefined(val);
+        }
+        return out;
+    }
+    return v;
 }
 function perTaskMeans(arm, metric) {
     // Per-trial decomposable value for this metric, averaged per task.

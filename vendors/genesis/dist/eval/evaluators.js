@@ -23,6 +23,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { redact } from "../shared/redact.js";
 import { SubprocessRunner } from "../evidence/runner.js";
+import { splitCommand } from "./subjects.js";
 import { retrievalTrialStats } from "./metrics.js";
 export function createEvaluator(spec, runner = new SubprocessRunner()) {
     switch (spec.type) {
@@ -241,7 +242,9 @@ export class CommandEvaluator {
             const outputFile = join(dir, "output.json");
             writeFileSync(taskFile, JSON.stringify(task, null, 2), "utf8");
             writeFileSync(outputFile, typeof output === "string" ? output : JSON.stringify(output), "utf8");
-            const parts = this.#command.split(/\s+/).map((p) => p.replaceAll("{task_file}", taskFile).replaceAll("{output_file}", outputFile).replaceAll("{output}", outputFile));
+            // Use the shared quote-aware parser (same as command subjects): naive
+            // split(/\s+/) breaks quoted paths, `node -e` scripts, and args with spaces.
+            const parts = splitCommand(this.#command).map((p) => p.replaceAll("{task_file}", taskFile).replaceAll("{output_file}", outputFile).replaceAll("{output}", outputFile));
             const result = await this.#runner.run(parts, { cwd: process.cwd(), timeoutMs: 60_000 });
             if (result.spawn_error || result.timed_out) {
                 return {
@@ -316,7 +319,7 @@ export class LlmCommandEvaluator {
             const outputFile = join(dir, "output.json");
             writeFileSync(taskFile, JSON.stringify(task, null, 2), "utf8");
             writeFileSync(outputFile, typeof output === "string" ? output : JSON.stringify(output), "utf8");
-            const parts = this.#command.split(/\s+/).map((p) => p.replaceAll("{task_file}", taskFile).replaceAll("{output_file}", outputFile));
+            const parts = splitCommand(this.#command).map((p) => p.replaceAll("{task_file}", taskFile).replaceAll("{output_file}", outputFile));
             const result = await this.#runner.run(parts, { cwd: process.cwd(), timeoutMs: 120_000 });
             const promptDigest = createHash("sha256").update(JSON.stringify({ task, output, rubric: this.#rubric })).digest("hex");
             if (result.spawn_error || result.timed_out) {
@@ -402,8 +405,19 @@ export class CompositeEvaluator {
         const parts = await Promise.all(this.#evals.map((e) => e.evaluate(task, output)));
         const scores = parts.map((p) => p.score).filter((s) => typeof s === "number");
         const passes = parts.map((p) => p.passed);
-        const decided = passes.filter((p) => typeof p === "boolean");
-        const passed = decided.length === 0 ? null : this.#mode === "all" ? decided.every(Boolean) : decided.some(Boolean);
+        // Three-valued logic (fail-closed): abstention (null) is not success.
+        // all: false if ANY part is false; true only if EVERY part is true; else null.
+        // any: true if ANY part is true; false only if EVERY part is false; else null.
+        const hasFalse = passes.some((p) => p === false);
+        const hasTrue = passes.some((p) => p === true);
+        const hasNull = passes.some((p) => p === null || p === undefined);
+        let passed;
+        if (this.#mode === "all") {
+            passed = hasFalse ? false : !hasNull && passes.length > 0 ? true : null;
+        }
+        else {
+            passed = hasTrue ? true : !hasNull && passes.length > 0 ? false : null;
+        }
         const score = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : null;
         return {
             evaluator: this.name, evaluator_kind: this.kind, score, passed,

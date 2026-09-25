@@ -25,8 +25,107 @@
         "LICENSE",
         ".claude-plugin"
       ],
-      "sha": "d85012a21aa9a6b0ce2637cddb473165fc741efe"
+      "sha": "6eebf6047a946000ec1bd059ea3743009d43561c"
+    },
+    {
+      "dest": "vendors/eve",
+      "status": "ok",
+      "copied": [
+        "src",
+        "bin",
+        "protocol",
+        "skills",
+        "docs",
+        "examples",
+        "tests",
+        "scripts",
+        "package.json",
+        "package-lock.json",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "biome.jsonc",
+        "vitest.config.ts",
+        "eve.config.example.yaml",
+        "README.md",
+        "LICENSE",
+        "ROADMAP.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        ".claude",
+        ".codex",
+        ".claude-plugin"
+      ],
+      "sha": "bb4e83d1ff64e4bfbe5acb3bf977aff172c5849b"
+    },
+    {
+      "dest": "vendors/adam",
+      "status": "ok",
+      "copied": [
+        "crates",
+        "bin",
+        "protocol",
+        "skills",
+        "scripts",
+        "Cargo.toml",
+        "Cargo.lock",
+        "Dockerfile",
+        "README.md",
+        "ARCHITECTURE.md",
+        "DESIGN.md",
+        "ROADMAP.md",
+        "LICENSE",
+        ".claude-plugin",
+        ".mcp.json"
+      ],
+      "sha": "70b3b9788e5ba8620c2e802b7820e610fb713d65"
+    },
+    {
+      "dest": "vendors/skein",
+      "status": "ok",
+      "copied": [
+        "src",
+        "tests",
+        "docs",
+        "pyproject.toml",
+        "README.md",
+        "CHANGELOG.md",
+        ".github"
+      ],
+      "sha": "823cf8733ea96b97e0877b04a9fab3f9e5df5752"
+    },
+    {
+      "dest": "vendors/eve-miro",
+      "status": "ok",
+      "copied": [
+        "src",
+        "eve",
+        "schemas",
+        "datasets",
+        "apps",
+        "core",
+        "providers",
+        "streaming",
+        "storage",
+        "experiments",
+        "scripts",
+        "infrastructure",
+        "docs",
+        "tests",
+        "pyproject.toml",
+        "Makefile",
+        "docker-compose.yml",
+        "install.sh",
+        "install.ps1",
+        "README.md",
+        "NOTICE.md",
+        "LICENSE",
+        "CHANGELOG.md",
+        ".env.example",
+        ".github",
+        "mirofish[AGPL-3.0, see NOTICE.md]"
+      ],
+      "sha": "3ce700173ca715d16db6c68926a065ac3fa2d908"
     }
   ],
-  "at": "2026-09-17T05:34:59.618Z"
+  "at": "2026-09-25T12:27:53.252Z"
 }

@@ -19,12 +19,12 @@ tools:
   - { name: godmode_task_get, from: [core(tasks)], args: { task_id }, out: { status, result } }
 resources:
   - { uri: genome://current, from: adam-kernel }
-  - { uri: memory://{kind}/{id}, from: adam-memory/eventlog }
+  - { uri: "memory://{kind}/{id}", from: adam-memory/eventlog }
   - { uri: ledger://genesis, from: genesis-ledger }
   - { uri: audit://adam, from: adam-governance }
   - { uri: graph://skein/current, from: skein-graph }
   - { uri: world://t0, from: eve-miro-world }
-  - { uri: report://eve/{id}, from: eve-reporting }
+  - { uri: "report://eve/{id}", from: eve-reporting }
 prompts:
   - { name: /godmode, from: adam-skills/godmode + eve-skills, loop: recall-before/verify-while/store-after }
   - { name: /validate-ux, from: eve-skill }

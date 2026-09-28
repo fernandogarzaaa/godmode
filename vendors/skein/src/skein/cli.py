@@ -72,10 +72,19 @@ def cmd_init(args) -> int:
         if r.returncode != 0:
             print(f"git init failed: {r.stderr}", file=sys.stderr)
             return 1
-    # git identity (needed for automated log commits)
-    subprocess.run(["git", "config", "user.email", "skein@localhost"],
-                   capture_output=True)
-    subprocess.run(["git", "config", "user.name", "skein"], capture_output=True)
+    # git identity: skein commits carry explicit -c user.name/-c user.email
+    # flags, so we never overwrite the user's repository-local identity.
+    # Only install a fallback when no identity is configured at all.
+    r_email = subprocess.run(["git", "config", "user.email"],
+                             capture_output=True, text=True)
+    r_name = subprocess.run(["git", "config", "user.name"],
+                            capture_output=True, text=True)
+    if not r_email.stdout.strip():
+        subprocess.run(["git", "config", "user.email", "skein@localhost"],
+                       capture_output=True)
+    if not r_name.stdout.strip():
+        subprocess.run(["git", "config", "user.name", "skein"],
+                       capture_output=True)
     sk = Path(root) / ".skein"
     sk.mkdir(exist_ok=True)
     (sk / "worktrees").mkdir(exist_ok=True)
@@ -117,7 +126,8 @@ def cmd_node_add(args) -> int:
                  context=args.context or "", constraints=args.constraints or "",
                  completion=args.completion or "", depends_on=depends,
                  blast_radius=blast, backend=args.backend or "claude_code",
-                 backend_config=backend_config)
+                 backend_config=backend_config,
+                 change_policy=getattr(args, "change_policy", "warn"))
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -153,6 +163,8 @@ def cmd_node_edit(args) -> int:
         fields["status"] = args.status
     if args.backend is not None:
         fields["backend"] = args.backend
+    if getattr(args, "change_policy", None) is not None:
+        fields["change_policy"] = args.change_policy
     if args.backend_config:
         try:
             extra = parse_backend_config(args.backend_config)
@@ -178,6 +190,85 @@ def cmd_node_edit(args) -> int:
         print(f"node {args.id}: human_interrupt recorded; agent claim parked as needs_human")
     else:
         print(f"edited node {args.id}")
+    return 0
+
+
+def cmd_node_delete(args) -> int:
+    from .edits import edit_node
+    root = find_repo_root()
+    node = g.load_graph(root).get(args.id)
+    if node is None:
+        print(f"unknown node '{args.id}'", file=sys.stderr)
+        return 1
+    wt_path = (node.get("worktree") or {}).get("path")
+    try:
+        outcome = edit_node(root, default_actor(), args.id, {},
+                            delete=True,
+                            delete_branch=args.delete_branch)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if outcome == "interrupt_delete":
+        print(f"node {args.id}: human_interrupt (delete) recorded; claim parked")
+    else:
+        print(f"removed node {args.id}")
+        if wt_path:
+            print(f"removed worktree {wt_path}")
+    return 0
+
+
+def cmd_worktree_gc(args) -> int:
+    from . import worktree as wt
+    root = find_repo_root()
+    removed = wt.gc_worktrees(root)
+    if not removed:
+        print("worktree gc: nothing to clean")
+    else:
+        for line in removed:
+            print(line)
+    return 0
+
+
+def cmd_result_show(args) -> int:
+    root = find_repo_root()
+    node = g.load_graph(root).get(args.id)
+    if node is None:
+        print(f"unknown node '{args.id}'", file=sys.stderr)
+        return 1
+    result = node.get("result") or {}
+    if not result.get("commit"):
+        print(f"node '{args.id}' has no result record", file=sys.stderr)
+        return 1
+    print(f"node:          {args.id}")
+    print(f"base commit:   {result.get('base_commit')}")
+    print(f"result commit: {result.get('commit')}")
+    print(f"attempt:       {result.get('attempt_id')}")
+    files = result.get("changed_files") or []
+    print(f"changed files: {len(files)}")
+    for f in files:
+        print(f"  {f}")
+    stats = result.get("diff_stats") or {}
+    if stats:
+        print("diff stats:")
+        for path in sorted(stats):
+            s = stats[path]
+            print(f"  {path}: +{s.get('added', 0)} -{s.get('deleted', 0)}")
+    return 0
+
+
+def cmd_result_verify(args) -> int:
+    from . import worktree as wt
+    root = find_repo_root()
+    try:
+        problems = wt.verify_result_record(root, args.id)
+    except wt.WorktreeError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if problems:
+        for p in problems:
+            print(f"mismatch: {p}", file=sys.stderr)
+        return 1
+    print(f"result for '{args.id}' verified")
     return 0
 
 
@@ -279,9 +370,22 @@ def cmd_run(args) -> int:
 
 def cmd_release(args) -> int:
     root = find_repo_root()
+    actor = default_actor()
+    token = None
+    if not args.force:
+        # A holder releasing their own claim presents the attempt's
+        # fencing token (read from the local claim record); anyone else
+        # must pass --force for an explicit, logged override.
+        try:
+            claim = c.current_claim(root, args.id)
+        except c.ClaimError:
+            claim = {}
+        if claim.get("holder") == actor:
+            token = claim.get("claim_token")
     try:
-        c.release_node(root, args.id, actor=default_actor(),
-                       force=args.force, note="force-released by human" if args.force else "")
+        c.release_node(root, args.id, actor=actor,
+                       force=args.force, note="force-released by human" if args.force else "",
+                       claim_token=token)
     except c.ClaimError as e:
         print(f"cannot release '{args.id}': {e}", file=sys.stderr)
         return 1
@@ -482,6 +586,8 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--backend-config", action="append", default=[],
                     metavar="key=value",
                     help="backend-specific parameters (repeatable); e.g. model=openai/gpt-5 for opencode")
+    pa.add_argument("--change-policy", default="warn", choices=["warn", "strict", "off"],
+                    help="policy for worktree changes outside the blast radius (default warn)")
     pa.set_defaults(func=cmd_node_add)
     pe = nsub.add_parser("edit", help="edit a node (claimed nodes -> human_interrupt)")
     pe.add_argument("id")
@@ -496,8 +602,15 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--backend", default=None)
     pe.add_argument("--backend-config", action="append", default=[],
                     metavar="key=value")
+    pe.add_argument("--change-policy", default=None,
+                    choices=["warn", "strict", "off"])
     pe.add_argument("--delete", action="store_true")
     pe.set_defaults(func=cmd_node_edit)
+    pdel = nsub.add_parser("delete", help="delete a node and remove its worktree")
+    pdel.add_argument("id")
+    pdel.add_argument("--delete-branch", action="store_true",
+                      help="also delete the node's git branch (kept by default)")
+    pdel.set_defaults(func=cmd_node_delete)
 
     pg = sub.add_parser("graph", help="render current graph state to terminal")
     pg.set_defaults(func=cmd_graph)
@@ -589,6 +702,20 @@ def build_parser() -> argparse.ArgumentParser:
     br.add_argument("name")
     br.add_argument("--scope", default="", choices=["", "repo", "user"])
     br.set_defaults(func=cmd_backends_remove)
+
+    pw = sub.add_parser("worktree", help="worktree maintenance")
+    wsub = pw.add_subparsers(dest="worktree_cmd", required=True)
+    wg = wsub.add_parser("gc", help="remove orphaned and stale worktrees")
+    wg.set_defaults(func=cmd_worktree_gc)
+
+    prs = sub.add_parser("result", help="inspect node result records")
+    rsub = prs.add_subparsers(dest="result_cmd", required=True)
+    rsh = rsub.add_parser("show", help="print a node's result record")
+    rsh.add_argument("id")
+    rsh.set_defaults(func=cmd_result_show)
+    rv = rsub.add_parser("verify", help="verify a node's result record against git")
+    rv.add_argument("id")
+    rv.set_defaults(func=cmd_result_verify)
     return p
 
 

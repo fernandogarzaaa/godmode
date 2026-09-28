@@ -1,5 +1,101 @@
 # Changelog
 
+## Unreleased (Phase 3: worktree and result-commit model)
+
+- Node deletion owns the worktree lifecycle: `skein node delete <id>`
+  removes the node's registered worktree through the same `edit_node`
+  rule the web canvas uses (the previously dead `remove_worktree()` is
+  now wired in). The branch is kept by default; `--delete-branch`
+  removes it too. Deleting a claimed or in-progress node still records
+  `human_interrupt` and parks the claim instead of yanking the worktree.
+- `skein worktree gc` reclaims orphaned and stale worktrees: registered
+  worktrees with no live node, worktrees whose branch ref is gone, and
+  unregistered directories under `.skein/worktrees`. Claimed and
+  in-progress worktrees are never touched, and the main repository
+  working tree is explicitly refused.
+- Base pinning on worktree reuse: `ensure_worktree()` records the
+  resolved `base_commit` SHA in the node's worktree record. Reuse is
+  refused when the worktree sits on a different base (HEAD is neither
+  the pinned base nor a descendant of it), when the recorded base
+  object is gone, or when a pinned-SHA base (a dependency result) no
+  longer matches because the dependency re-ran. The error directs the
+  operator to `skein worktree gc` or a node reset. The existing
+  branch-mismatch refusal is unchanged.
+- `base_branch_for()` no longer trusts recorded result SHAs blindly: a
+  dependency result commit whose object is absent from the store now
+  raises `BaseCommitUnavailable` instead of handing downstream nodes a
+  dead base. Legacy dependency branches are resolved before use too.
+- Result introspection: `skein result show <node-id>` prints the result
+  record (base/result commits, attempt, changed files, diff stats) and
+  `skein result verify <node-id>` checks it against the object store:
+  result and base objects exist, the result descends from the base, and
+  the recorded diff stats match a recomputed numstat. A missing result
+  record is an error, not an empty pass.
+
+## Unreleased (Phase 2: canonical execution runtime)
+
+- One execution path: `runtime.execute()` is now the single
+  spawn/drain/kill implementation used by the supervisor, the verifier,
+  and `ProfileAdapter.run()`. Separate stdout/stderr capture feeds the
+  backend's exact `(stdout, stderr, exit_code)` triple to its output
+  parser, so supervised evidence matches `adapter.run()` byte for byte.
+- The supervisor no longer bypasses parsers: stream-json backends
+  (gemini, cursor) now record harvested text as evidence instead of raw
+  event JSON. Legacy adapters without a profile keep the stdout plus
+  stderr-trailer shape.
+- Missing backend binary is exit 127 through every path, never an
+  uncaught `FileNotFoundError` (the old supervisor `Popen` call could
+  crash `run_node` outright).
+- Verification is cancellable: `run_completion()` takes `should_abort`
+  and the supervisor wires its interrupt check in, so a human interrupt
+  kills a running completion command's process tree and stops the rest.
+- Windows process-tree kill is real now: `taskkill /PID /T /F` replaces
+  the old best-effort direct-child terminate; tree-kill tests use
+  forward-slash pidfile paths (the old `r'C:\...'` embedding was a
+  `SyntaxError` on Windows via the `\U` escape).
+
+## Unreleased (Phase 1: correctness and state-machine invariants)
+
+- Fenced claims: every claim mints an immutable `attempt_id` and
+  `claim_token`; heartbeat, release, complete, and fail must present the
+  live token. Stale attempts (reaped, force-released, superseded) can no
+  longer complete, heartbeat, or revive a lease. Tokenless legacy
+  lifecycle events are rejected at append and during reduction.
+- Human interrupts clear ownership atomically and park the node at
+  `needs_human`; the supervisor no longer force-releases after an
+  interrupt (which used to drag the node back to `unclaimed`).
+- Reaper releases are scoped to the exact attempt examined
+  (`reaped_attempt_id`) and carry the decision time separately
+  (`reaped_as_of`), so a delayed duplicate release cannot wipe a newer
+  claim that landed in between.
+- Durable result commits: verified work is checkpointed as a git commit
+  recording base, result, changed files, diff stats, and attempt id.
+  Downstream worktrees branch from the dependency's result commit, never
+  from an ambient branch. Missing base refs raise
+  `BaseCommitUnavailable` instead of silently substituting the current
+  branch.
+- Integration is now a real fenced attempt: `__integrate` nodes are
+  claimed by `skein-auto-merge`, merge in a temporary worktree, verify,
+  and record a durable result commit. Integration nodes are exempt from
+  recursively requiring their own `__integrate` node.
+- Event log hardening: UUID event ids, schema version, per-repo
+  sequences, fsync on append, malformed/truncated NDJSON recovery,
+  atomic snapshot replacement, deterministic reduction ordering, and a
+  snapshot digest that binds both the log and the generated graph (a
+  corrupted graph.json is rebuilt, not trusted).
+- Repository-wide lock moved to `.git/skein.lock` so it can never be
+  staged through `.skein`; heartbeat git commits are off by default;
+  Skein git commits use command-local identity flags and never touch
+  the user's git config.
+- Execution runtime hardening (`src/skein/runtime.py`): backend stdout
+  is drained continuously (the old read-after-exit design deadlocked
+  past ~64KB), output is capped at 1MB with truncation noted, and
+  aborts/timeouts kill the whole process tree via process groups on
+  POSIX. Verification commands run through the same bounded runner.
+- New regression suites: `tests/test_fencing.py` (fencing, reaping,
+  lifecycle, graph integrity) and `tests/test_runtime.py` (deadlock,
+  output caps, tree kill). 99 tests green.
+
 ## Unreleased (Stage 8: multi-backend adapter engine)
 
 - New profile-driven backend engine: `BackendProfile` data schema +

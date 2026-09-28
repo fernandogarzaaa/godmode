@@ -10,6 +10,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from . import graph as g
 from . import claim as c
@@ -72,10 +73,19 @@ def cmd_init(args) -> int:
         if r.returncode != 0:
             print(f"git init failed: {r.stderr}", file=sys.stderr)
             return 1
-    # git identity (needed for automated log commits)
-    subprocess.run(["git", "config", "user.email", "skein@localhost"],
-                   capture_output=True)
-    subprocess.run(["git", "config", "user.name", "skein"], capture_output=True)
+    # git identity: skein commits carry explicit -c user.name/-c user.email
+    # flags, so we never overwrite the user's repository-local identity.
+    # Only install a fallback when no identity is configured at all.
+    r_email = subprocess.run(["git", "config", "user.email"],
+                             capture_output=True, text=True)
+    r_name = subprocess.run(["git", "config", "user.name"],
+                            capture_output=True, text=True)
+    if not r_email.stdout.strip():
+        subprocess.run(["git", "config", "user.email", "skein@localhost"],
+                       capture_output=True)
+    if not r_name.stdout.strip():
+        subprocess.run(["git", "config", "user.name", "skein"],
+                       capture_output=True)
     sk = Path(root) / ".skein"
     sk.mkdir(exist_ok=True)
     (sk / "worktrees").mkdir(exist_ok=True)
@@ -84,7 +94,9 @@ def cmd_init(args) -> int:
         ttl = int(getattr(args, "ttl", 1800))
         g.config_path(root).write_text(
             json.dumps({"default_ttl_seconds": ttl,
-                        "heartbeat_interval_seconds": 60}, indent=2),
+                        "heartbeat_interval_seconds": 60,
+                        "default_max_retries": 3,
+                        "default_retry_backoff_seconds": 60}, indent=2),
             encoding="utf-8")
     if not g.log_path(root).exists():
         g.log_path(root).write_text("", encoding="utf-8")
@@ -117,7 +129,11 @@ def cmd_node_add(args) -> int:
                  context=args.context or "", constraints=args.constraints or "",
                  completion=args.completion or "", depends_on=depends,
                  blast_radius=blast, backend=args.backend or "claude_code",
-                 backend_config=backend_config)
+                 backend_config=backend_config,
+                 change_policy=getattr(args, "change_policy", "warn"),
+                 max_retries=getattr(args, "max_retries", None),
+                 retry_backoff_seconds=getattr(args, "retry_backoff_seconds",
+                                              None))
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -153,6 +169,12 @@ def cmd_node_edit(args) -> int:
         fields["status"] = args.status
     if args.backend is not None:
         fields["backend"] = args.backend
+    if getattr(args, "change_policy", None) is not None:
+        fields["change_policy"] = args.change_policy
+    if getattr(args, "max_retries", None) is not None:
+        fields["max_retries"] = args.max_retries
+    if getattr(args, "retry_backoff_seconds", None) is not None:
+        fields["retry_backoff_seconds"] = args.retry_backoff_seconds
     if args.backend_config:
         try:
             extra = parse_backend_config(args.backend_config)
@@ -178,6 +200,85 @@ def cmd_node_edit(args) -> int:
         print(f"node {args.id}: human_interrupt recorded; agent claim parked as needs_human")
     else:
         print(f"edited node {args.id}")
+    return 0
+
+
+def cmd_node_delete(args) -> int:
+    from .edits import edit_node
+    root = find_repo_root()
+    node = g.load_graph(root).get(args.id)
+    if node is None:
+        print(f"unknown node '{args.id}'", file=sys.stderr)
+        return 1
+    wt_path = (node.get("worktree") or {}).get("path")
+    try:
+        outcome = edit_node(root, default_actor(), args.id, {},
+                            delete=True,
+                            delete_branch=args.delete_branch)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if outcome == "interrupt_delete":
+        print(f"node {args.id}: human_interrupt (delete) recorded; claim parked")
+    else:
+        print(f"removed node {args.id}")
+        if wt_path:
+            print(f"removed worktree {wt_path}")
+    return 0
+
+
+def cmd_worktree_gc(args) -> int:
+    from . import worktree as wt
+    root = find_repo_root()
+    removed = wt.gc_worktrees(root)
+    if not removed:
+        print("worktree gc: nothing to clean")
+    else:
+        for line in removed:
+            print(line)
+    return 0
+
+
+def cmd_result_show(args) -> int:
+    root = find_repo_root()
+    node = g.load_graph(root).get(args.id)
+    if node is None:
+        print(f"unknown node '{args.id}'", file=sys.stderr)
+        return 1
+    result = node.get("result") or {}
+    if not result.get("commit"):
+        print(f"node '{args.id}' has no result record", file=sys.stderr)
+        return 1
+    print(f"node:          {args.id}")
+    print(f"base commit:   {result.get('base_commit')}")
+    print(f"result commit: {result.get('commit')}")
+    print(f"attempt:       {result.get('attempt_id')}")
+    files = result.get("changed_files") or []
+    print(f"changed files: {len(files)}")
+    for f in files:
+        print(f"  {f}")
+    stats = result.get("diff_stats") or {}
+    if stats:
+        print("diff stats:")
+        for path in sorted(stats):
+            s = stats[path]
+            print(f"  {path}: +{s.get('added', 0)} -{s.get('deleted', 0)}")
+    return 0
+
+
+def cmd_result_verify(args) -> int:
+    from . import worktree as wt
+    root = find_repo_root()
+    try:
+        problems = wt.verify_result_record(root, args.id)
+    except wt.WorktreeError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    if problems:
+        for p in problems:
+            print(f"mismatch: {p}", file=sys.stderr)
+        return 1
+    print(f"result for '{args.id}' verified")
     return 0
 
 
@@ -239,7 +340,162 @@ def cmd_claim(args) -> int:
     return 0
 
 
+def _run_one_node(root: str, node_id: str, holder: str, actor: str,
+                  args) -> str:
+    """Run a single node through the supervised path. Returns the outcome
+    string (done/failed/interrupted/superseded) or 'skipped: <reason>'."""
+    from .supervisor import run_node
+    try:
+        result = run_node(root, node_id, holder,
+                          verify_timeout=args.verify_timeout,
+                          heartbeat_interval=args.heartbeat_interval,
+                          adapter_timeout=args.adapter_timeout,
+                          extra_args=args.adapter_args or [],
+                          actor=actor)
+    except (c.ClaimError, ValueError, RuntimeError) as e:
+        return f"skipped: {e}"
+    return result.get("outcome", "unknown")
+
+
+def _integration_pending(nodes: dict, node: dict) -> bool:
+    """True when the only thing a multi-dependency node waits for is its
+    not-yet-created __integrate node: all deps are done, so run_node's
+    integration pre-step (create + deterministic auto-merge) can proceed.
+    The scheduler must NOT pre-create the integration node itself: an
+    early creation attempts the auto-merge before the parents are ready
+    and is never retried."""
+    deps = node.get("depends_on", [])
+    if len(deps) < 2 or node.get("integration_for"):
+        return False
+    integ = nodes.get(f"{node['id']}__integrate")
+    if integ is not None and not integ.get("removed"):
+        return False  # exists: real eligibility decides
+    return all((nodes.get(d) or {}).get("status") == "done" for d in deps)
+
+
+def _schedulable_batch(root: str, limit: int) -> list:
+    """Node ids that can be claimed right now, sorted for determinism."""
+    nodes = g.load_graph(root)
+    batch = []
+    for nid in sorted(nodes):
+        n = nodes[nid]
+        if n.get("removed") or n["status"] != "unclaimed":
+            continue
+        ok, _ = c.eligibility(root, nid)
+        if not ok and _integration_pending(nodes, n):
+            # run_node creates the __integrate node and attempts the
+            # deterministic merge before claiming
+            ok = True
+        if ok:
+            batch.append(nid)
+        if len(batch) >= limit:
+            break
+    return batch
+
+
+def _next_retry_wait(root: str) -> Optional[float]:
+    """Seconds until the earliest pending retry backoff elapses, or None
+    when no unclaimed node is waiting on backoff."""
+    now = datetime.now(timezone.utc)
+    earliest = None
+    for n in g.load_graph(root).values():
+        if n.get("removed") or n["status"] != "unclaimed":
+            continue
+        ra = c.parse_ts(n.get("retry_at"))
+        if ra is None:
+            continue
+        wait = (ra - now).total_seconds()
+        if wait > 0 and (earliest is None or wait < earliest):
+            earliest = wait
+    return earliest
+
+
+def _sleep_chunked(seconds: float) -> None:
+    """Sleep in short chunks so Ctrl-C stays responsive."""
+    import time
+    deadline = time.monotonic() + max(0.0, seconds)
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(5.0, remaining))
+
+
+def cmd_run_all(args) -> int:
+    """Multi-node scheduler: repeatedly claim and run eligible nodes
+    sequentially (no threads) until none remain or --max-nodes is hit.
+
+    When no node is eligible but some are waiting out a retry backoff,
+    the scheduler waits for the earliest deadline instead of dropping
+    the retries on the floor.
+    """
+    root = find_repo_root()
+    holder = args.agent_id or default_actor()
+    actor = default_actor()
+    max_parallel = args.max_parallel if args.max_parallel and args.max_parallel > 0 else 2
+    max_nodes = args.max_nodes
+    c.reap_expired(root)
+    results: list = []  # (node_id, outcome, attempts)
+    ran = 0
+    while True:
+        if max_nodes is not None and ran >= max_nodes:
+            break
+        batch = _schedulable_batch(root, max_parallel)
+        if not batch:
+            wait = _next_retry_wait(root)
+            if wait is None:
+                break
+            print(f"no eligible nodes; waiting {wait:.0f}s for retry backoff...")
+            _sleep_chunked(wait)
+            continue
+        for nid in batch:
+            if max_nodes is not None and ran >= max_nodes:
+                break
+            print(f"run {nid} ...")
+            outcome = _run_one_node(root, nid, holder, actor, args)
+            ran += 1
+            node = g.load_graph(root).get(nid) or {}
+            attempts = len(node.get("attempts") or [])
+            results.append((nid, outcome, attempts))
+            print(f"run {nid}: {outcome}")
+    print(f"{'NODE':<24}{'OUTCOME':<16}ATTEMPTS")
+    for nid, outcome, attempts in results:
+        print(f"{nid:<24}{outcome:<16}{attempts}")
+    done = sum(1 for _, o, _ in results if o == "done")
+    failed = sum(1 for _, o, _ in results if o == "failed")
+    interrupted = sum(1 for _, o, _ in results if o == "interrupted")
+    print(f"ran {len(results)} node(s): {done} done, {failed} failed, "
+          f"{interrupted} interrupted")
+    pending = []
+    nodes = g.load_graph(root)
+    for nid in sorted(nodes):
+        n = nodes[nid]
+        if n.get("removed") or n["status"] != "unclaimed":
+            continue
+        ok, reason = c.eligibility(root, nid)
+        if not ok:
+            pending.append((nid, reason))
+    if pending:
+        print("not run:")
+        for nid, reason in pending:
+            print(f"  {nid}: {reason}")
+    if interrupted:
+        return 3
+    if failed:
+        return 2
+    return 0
+
+
 def cmd_run(args) -> int:
+    if getattr(args, "all", False):
+        if args.backend:
+            print("cannot use --backend with --all "
+                  "(each node uses its own backend)", file=sys.stderr)
+            return 1
+        return cmd_run_all(args)
+    if not args.id:
+        print("node id required (or use --all)", file=sys.stderr)
+        return 1
     from .supervisor import run_node
     root = find_repo_root()
     holder = args.agent_id or default_actor()
@@ -279,13 +535,52 @@ def cmd_run(args) -> int:
 
 def cmd_release(args) -> int:
     root = find_repo_root()
+    # One `release` verb, two jobs, disambiguated by the target: a live
+    # node id releases that node's claim (the long-standing behavior);
+    # anything else is treated as a release tag name (Phase 5). A tag
+    # that collides with a live node id always takes the claim path.
+    node = g.load_graph(root).get(args.target)
+    if node is not None and not node.get("removed"):
+        return _cmd_claim_release(args, root)
+    return _cmd_tag_release(args, root)
+
+
+def _cmd_claim_release(args, root: str) -> int:
+    actor = default_actor()
+    token = None
+    if not args.force:
+        # A holder releasing their own claim presents the attempt's
+        # fencing token (read from the local claim record); anyone else
+        # must pass --force for an explicit, logged override.
+        try:
+            claim = c.current_claim(root, args.target)
+        except c.ClaimError:
+            claim = {}
+        if claim.get("holder") == actor:
+            token = claim.get("claim_token")
     try:
-        c.release_node(root, args.id, actor=default_actor(),
-                       force=args.force, note="force-released by human" if args.force else "")
+        c.release_node(root, args.target, actor=actor,
+                       force=args.force, note="force-released by human" if args.force else "",
+                       claim_token=token)
     except c.ClaimError as e:
-        print(f"cannot release '{args.id}': {e}", file=sys.stderr)
+        print(f"cannot release '{args.target}': {e}", file=sys.stderr)
         return 1
-    print(f"released {args.id}" + (" (forced)" if args.force else ""))
+    print(f"released {args.target}" + (" (forced)" if args.force else ""))
+    return 0
+
+
+def _cmd_tag_release(args, root: str) -> int:
+    from . import shipping as sh
+    try:
+        r = sh.release_tag(root, args.target, message=args.message,
+                           allow_unshipped=args.allow_unshipped,
+                           actor=default_actor())
+    except sh.ReleaseError as e:
+        print(f"cannot release '{args.target}': {e}", file=sys.stderr)
+        return 1
+    print(f"released {r['tag']} on {r['target']} ({r['head'][:8]})")
+    if r["shipped_nodes"]:
+        print(f"shipped since last release: {', '.join(r['shipped_nodes'])}")
     return 0
 
 
@@ -299,7 +594,7 @@ def cmd_status(args) -> int:
         print("(empty graph)")
         return 0
     now = datetime.now(timezone.utc)
-    print(f"{'ID':<22}{'STATUS':<12}{'HOLDER':<16}LEASE")
+    print(f"{'ID':<22}{'STATUS':<12}{'HOLDER':<16}{'LEASE':<14}{'TRIES':<6}{'SHIPPED':<16}NOTE")
     for nid in sorted(nodes):
         n = nodes[nid]
         claim = n.get("claim") or {}
@@ -311,7 +606,17 @@ def cmd_status(args) -> int:
             if last:
                 remain = ttl - (now - last).total_seconds()
                 lease = "EXPIRED" if remain <= 0 else f"{int(remain)}s left"
-        print(f"{nid:<22}{n['status']:<12}{holder:<16}{lease}")
+        elif n["status"] == "unclaimed":
+            ra = c.parse_ts(n.get("retry_at"))
+            if ra is not None:
+                remain = (ra - now).total_seconds()
+                lease = f"backoff {int(remain)}s" if remain > 0 else "retry due"
+        tries = len(n.get("attempts") or [])
+        shipped = ",".join(sorted((n.get("shipped") or {}).keys())) or "-"
+        note = ""
+        if n["status"] == "needs_human" and n.get("handoff_note"):
+            note = str(n["handoff_note"]).splitlines()[0][:80]
+        print(f"{nid:<22}{n['status']:<12}{holder:<16}{lease:<14}{tries:<6}{shipped:<16}{note}")
     return 0
 
 
@@ -456,6 +761,52 @@ def cmd_reap(args) -> int:
     return 0
 
 
+def cmd_ship(args) -> int:
+    from . import shipping as sh
+    root = find_repo_root()
+    actor = default_actor()
+    if getattr(args, "all", False):
+        if args.id:
+            print("cannot combine a node id with --all", file=sys.stderr)
+            return 1
+        try:
+            results = sh.ship_all(root, target=args.to, actor=actor)
+        except (sh.ShipError, wt.BaseCommitUnavailable) as e:
+            print(f"ship --all failed: {e}", file=sys.stderr)
+            return 1
+        print(f"{'NODE':<24}{'STATUS':<16}DETAIL")
+        for r in results:
+            if r["status"] == "shipped":
+                detail = f"-> {r['target']} {r['merge_commit'][:8]}"
+            elif r["status"] == "already-shipped":
+                detail = f"already in {r['target']}"
+            else:
+                detail = r.get("reason", "")
+            print(f"{r['node_id']:<24}{r['status']:<16}{detail}")
+        done = sum(1 for r in results if r["status"] == "shipped")
+        already = sum(1 for r in results if r["status"] == "already-shipped")
+        skipped = sum(1 for r in results if r["status"] == "skipped")
+        print(f"{done} shipped, {already} already shipped, {skipped} skipped")
+        return 0
+    if not args.id:
+        print("node id required (or use --all)", file=sys.stderr)
+        return 1
+    try:
+        r = sh.ship_node(root, args.id, target=args.to,
+                         ff_only=args.ff_only, force=args.force, actor=actor)
+    except (sh.ShipError, wt.BaseCommitUnavailable) as e:
+        print(f"cannot ship '{args.id}': {e}", file=sys.stderr)
+        return 1
+    if r["status"] == "already-shipped":
+        print(f"{args.id}: already shipped "
+              f"(result {r['result_commit'][:8]} in {r['target']})")
+    else:
+        extra = " (diverged base, forced)" if r.get("diverged") else ""
+        print(f"shipped {args.id} -> {r['target']} "
+              f"as {r['merge_commit'][:8]}{extra}")
+    return 0
+
+
 # ---------- parser ----------
 
 def build_parser() -> argparse.ArgumentParser:
@@ -482,6 +833,13 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--backend-config", action="append", default=[],
                     metavar="key=value",
                     help="backend-specific parameters (repeatable); e.g. model=openai/gpt-5 for opencode")
+    pa.add_argument("--change-policy", default="warn", choices=["warn", "strict", "off"],
+                    help="policy for worktree changes outside the blast radius (default warn)")
+    pa.add_argument("--max-retries", type=int, default=None,
+                    help="retries after the initial attempt (default: config default_max_retries; 0 = no retries)")
+    pa.add_argument("--retry-backoff-seconds", type=float, default=None,
+                    help="base backoff between retries in seconds; exponential with jitter "
+                         "(default: config default_retry_backoff_seconds)")
     pa.set_defaults(func=cmd_node_add)
     pe = nsub.add_parser("edit", help="edit a node (claimed nodes -> human_interrupt)")
     pe.add_argument("id")
@@ -496,8 +854,17 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--backend", default=None)
     pe.add_argument("--backend-config", action="append", default=[],
                     metavar="key=value")
+    pe.add_argument("--change-policy", default=None,
+                    choices=["warn", "strict", "off"])
+    pe.add_argument("--max-retries", type=int, default=None)
+    pe.add_argument("--retry-backoff-seconds", type=float, default=None)
     pe.add_argument("--delete", action="store_true")
     pe.set_defaults(func=cmd_node_edit)
+    pdel = nsub.add_parser("delete", help="delete a node and remove its worktree")
+    pdel.add_argument("id")
+    pdel.add_argument("--delete-branch", action="store_true",
+                      help="also delete the node's git branch (kept by default)")
+    pdel.set_defaults(func=cmd_node_delete)
 
     pg = sub.add_parser("graph", help="render current graph state to terminal")
     pg.set_defaults(func=cmd_graph)
@@ -509,7 +876,14 @@ def build_parser() -> argparse.ArgumentParser:
     pc.set_defaults(func=cmd_claim)
 
     pr = sub.add_parser("run", help="claim + worktree + backend + verify + report")
-    pr.add_argument("id")
+    pr.add_argument("id", nargs="?", default=None,
+                    help="node id (omit with --all)")
+    pr.add_argument("--all", action="store_true",
+                    help="scheduler: run all eligible nodes sequentially until none remain")
+    pr.add_argument("--max-parallel", type=int, default=2,
+                    help="nodes to run per scheduler pass (sequential, default 2)")
+    pr.add_argument("--max-nodes", type=int, default=None,
+                    help="stop the scheduler after this many node runs")
     pr.add_argument("--agent-id", default=None)
     pr.add_argument("--backend", default=None,
                     help="override the node's recorded backend for this run")
@@ -520,10 +894,14 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--adapter-args", nargs=argparse.REMAINDER, default=[])
     pr.set_defaults(func=cmd_run)
 
-    prl = sub.add_parser("release", help="release a node's claim")
-    prl.add_argument("id")
+    prl = sub.add_parser("release", help="release a node's claim, or cut a release tag")
+    prl.add_argument("target", help="node id (releases its claim) or tag name (e.g. v0.1.0)")
     prl.add_argument("--force", action="store_true",
                      help="explicit force-release of another holder's claim (logged)")
+    prl.add_argument("--message", default=None,
+                     help="release tag annotation (default: 'skein release <tag>')")
+    prl.add_argument("--allow-unshipped", action="store_true",
+                     help="cut the release tag even with unshipped done nodes")
     prl.set_defaults(func=cmd_release)
 
     ps = sub.add_parser("status", help="all nodes, claims, health of active leases")
@@ -536,6 +914,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     prp = sub.add_parser("reap", help="release expired leases now")
     prp.set_defaults(func=cmd_reap)
+
+    psh = sub.add_parser("ship", help="merge a done node's result commit into a branch")
+    psh.add_argument("id", nargs="?", default=None,
+                     help="node id (omit with --all)")
+    psh.add_argument("--all", action="store_true",
+                     help="ship every done node with a result record, in dependency order")
+    psh.add_argument("--to", default=None,
+                     help="target branch (default: current branch)")
+    psh.add_argument("--ff-only", action="store_true",
+                     help="fail unless the merge can fast-forward")
+    psh.add_argument("--force", action="store_true",
+                     help="ship even though the target moved past the recorded base")
+    psh.set_defaults(func=cmd_ship)
 
     psy = sub.add_parser("sync", help="share the event log via git (fetch/merge/push)")
     psy.add_argument("--no-push", action="store_true")
@@ -589,6 +980,20 @@ def build_parser() -> argparse.ArgumentParser:
     br.add_argument("name")
     br.add_argument("--scope", default="", choices=["", "repo", "user"])
     br.set_defaults(func=cmd_backends_remove)
+
+    pw = sub.add_parser("worktree", help="worktree maintenance")
+    wsub = pw.add_subparsers(dest="worktree_cmd", required=True)
+    wg = wsub.add_parser("gc", help="remove orphaned and stale worktrees")
+    wg.set_defaults(func=cmd_worktree_gc)
+
+    prs = sub.add_parser("result", help="inspect node result records")
+    rsub = prs.add_subparsers(dest="result_cmd", required=True)
+    rsh = rsub.add_parser("show", help="print a node's result record")
+    rsh.add_argument("id")
+    rsh.set_defaults(func=cmd_result_show)
+    rv = rsub.add_parser("verify", help="verify a node's result record against git")
+    rv.add_argument("id")
+    rv.set_defaults(func=cmd_result_verify)
     return p
 
 

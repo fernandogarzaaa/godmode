@@ -1,0 +1,96 @@
+name: Publish
+
+# Publishes the godmode npm package when a release tag (vX.Y.Z) is pushed.
+# This closes the registry drift where the README-advertised
+# `npm i -g godmode` installed a stale 0.0.3 while the repo was at 1.0.0.
+#
+# Requires a repo secret named NPM_TOKEN holding an npm automation token
+# with publish access to the `godmode` package.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v1.0.0)"
+        required: true
+      dry_run:
+        description: "Validate only (npm publish --dry-run)"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  # Required for npm provenance, which ties the published tarball to this
+  # workflow run so consumers can verify where it was built.
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      # A mutable ref (main, a branch, a short SHA) must never reach the
+      # production publish step: only an immutable release tag (vX.Y.Z)
+      # resolves to a fixed commit, and it must match package.json.
+      - name: Validate release tag
+        run: |
+          TAG="${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}"
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Refusing to publish from '$TAG'. Production publishes require an immutable release tag (e.g. v1.0.0), not a branch or mutable ref."
+            exit 1
+          fi
+          VER=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$VER" ]; then
+            echo "::error::Tag $TAG does not match package.json version $VER. Tags must match the package version exactly."
+            exit 1
+          fi
+          echo "Publishing godmode@$VER from tag $TAG"
+
+      # Same verification path as ci.yml: install, doctor, smoke, unit tests.
+      - run: npm install --omit=dev --no-audit --no-fund
+      - run: node bin/godmode.js doctor
+      - run: node scripts/smoke.mjs
+      - run: node --test tests/godmode.test.js
+
+      - name: Check npm auth
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "::error::NPM_TOKEN is not configured. Create an npm automation token (npmjs.com -> Access Tokens -> Generate New Token -> Automation) with publish access to godmode, add it as a repo secret named NPM_TOKEN, then push the release tag again."
+            exit 1
+          fi
+
+      - name: Skip if version already published
+        id: already
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          echo "Package: $PKG@$VER"
+          if npm view "$PKG@$VER" version --silent 2>/dev/null; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$PKG@$VER is already on npm - nothing to do."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm (dry run)
+        if: steps.already.outputs.published == 'false' && inputs.dry_run == true
+        run: npm publish --dry-run --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish to npm
+        if: steps.already.outputs.published == 'false' && inputs.dry_run != true
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

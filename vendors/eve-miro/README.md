@@ -35,7 +35,13 @@ Live OASIS still needs Python **3.11** (`mirofish/.venv`) plus an OpenAI-compati
 eve-miro/          data fabric, world state, API, dashboard (MIT)
 mirofish/          swarm simulation engine (AGPL-3.0, first-party)
 eve/               experience validation engine (MIT, first-party)
+marketsim/         market simulation engine (MIT, first-party)
 ```
+
+Market data fabric (Phase 1, in `eve-miro/`): yfinance OHLCV bars, options
+chains, FRED macro series, VIX, and markets-themed GDELT news fold into
+`Economy.indicators["market_snapshot"]` in WorldState(t0). See
+`providers/README.md`.
 
 See `NOTICE.md` for the license split. Combined distribution that includes
 `mirofish/` is subject to AGPL-3.0 for that component.

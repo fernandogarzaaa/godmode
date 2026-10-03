@@ -1,0 +1,200 @@
+# Market trust accumulation
+
+`eve-miro market-accumulate` is the weekly job that keeps the market
+scenario trust ledger honest. Every run grounds all three market
+scenarios in the latest live market state, simulates them with the
+Phase 5 calibrated archetype parameters, aligns each simulated path
+against the most recent realized window, and appends one record per
+scenario per ISO week to the trust ledger. The per-class trust summary
+is recomputed from the full ledger file on every run.
+
+## What one run does
+
+1. **Ground.** Fetches live daily bars for SPY, AAPL, QQQ, and IWM
+   via yfinance
+   (fail closed when unavailable), the latest VIX close for context
+   (soft-fail), a FRED macro snapshot when `FRED_API_KEY` is set (soft
+   skip otherwise), and a GDELT market-news article count (soft skip on
+   failure). A trailing bar dated today (UTC) is dropped so the realized
+   window always ends on the latest complete bar.
+2. **Simulate.** Runs every scenario in the `experiments/market/`
+   registry (currently seven: the three original shock scenarios plus
+   the four historical shock templates documented in
+   `docs/market-sim-guide.md`) through the marketsim engine over a
+   480-hour horizon (20 trading days), using the calibrated parameters
+   from `storage/market/calibration_result.json` (Phase 5 best fit).
+   Scenarios are discovered from the registry, never from a hardcoded
+   list, so a new YAML file is picked up automatically.
+3. **Align.** Each simulated daily path is aligned against the trailing
+   20 trading days with the Phase 3 alignment module: two-sample KS on
+   log returns, rolling realized-vol path MAE, and max-drawdown depth
+   error, aggregated to a score in [0, 1].
+4. **Ledger.** Appends one JSON record per scenario to
+   `storage/market/trust_ledger.jsonl`, keyed by ISO week
+   (e.g. `2026-W40`). Recomputes `storage/market/trust_summary.json`
+   from the whole ledger file (never from memory) and refreshes
+   `storage/market/latest_market_run.json` so the dashboard Market tab
+   shows the newest run with the ledger-wide trust table.
+
+Idempotency: a week with all scenario records already present
+exits 0 with a skip message. A partially recorded week only runs the
+missing scenarios. To re-run a week manually, pass `--week` with an
+unrecorded label such as `2026-W40b`.
+
+Each historical shock template has its own scenario class
+(`earn_gap_down`, `earn_gap_snapback`, `sector_flash`, `macro_slide`),
+so trust accumulates separately per template. The templates are
+stress-test shapes, not replays: a rising trust score means the
+template's structure keeps matching realized windows, never that the
+source event will repeat.
+
+## Ledger schema
+
+One JSON object per line in `trust_ledger.jsonl`:
+
+- `week`: ISO week label, e.g. `2026-W40`
+- `run_at`: UTC timestamp of the run
+- `scenario`: scenario id, e.g. `sell_shock_001`
+- `scenario_class`: `sell_shock`, `volatility_spike`, or `rate_shock`
+- `tickers`: `["SPY", "AAPL", "QQQ", "IWM"]`
+- `hours`: simulated horizon (480)
+- `n_bars`: realized bars aligned (20)
+- `vix`: latest VIX close, or null when the fetch failed
+- `macro`: FRED snapshot (`{series_id: {date, value}}`), or null
+- `news`: `{"n_articles": N, "query": ...}`, or null
+- `jev_relevance`: Jev's 0..1 relevance score for this record's
+  scenario class this week, or null when Jev scoring was disabled or
+  unavailable. Weak signal only, never ingested by trust.
+- `alignment`: `aggregate_score`, per-symbol metrics
+  (`symbol_score`, `ks_statistic`, `vol_path_mae`, `drawdown_error`,
+  `n_points`), `skipped_symbols`, and `jev_judge_score` (Jev's 0..1
+  answer to "does the simulated path capture the realized stress
+  character", or null; weak signal only)
+- `data_source`: always `"live"` (fail closed: no bars, no record)
+
+## Jev weak-signal scoring
+
+When `JEV_ENABLED=1`, the run asks the TypeSafe Jev decision API two
+kinds of typed score questions (module
+`src/eve_miro/core/reality/jev_scoring.py`):
+
+1. **Relevance.** After grounding, one score question per scenario
+   class: how relevant is it to stress-test this class this week, given
+   the market snapshot (VIX, trailing vol, drawdown, trend per ticker)?
+   The answers drive weighting and attention in the report, never
+   prediction. Stored per record as `jev_relevance` and on
+   `latest_market_run.json` as the `jev_relevance` map.
+2. **Judge.** After alignment, one score question per scenario: does
+   the simulated path capture the character of the realized stress
+   (shape, depth, recovery)? Stored as
+   `alignment.jev_judge_score`.
+
+Standing rules, carried over from Signal Lab: Jev is a scalable weak
+signal, NOT gold. The empirical per-class trust computation never
+ingests Jev scores; they live under separate JSON keys and are labeled
+as weak signal wherever they appear. Scoring fails soft everywhere: no
+key, missing credential helper, API error, or timeout means skip
+scoring with a logged note, never fail the run. Jev scoring is opt-in:
+manual runs default off, the weekly cron enables it with
+`JEV_ENABLED=1`.
+
+## Trust thresholds
+
+Per-class trust comes from `scenario_trust_from_ledger` over the full
+ledger: `score = 0.6 * (drawdown within 2% fraction) + 0.4 * (1 - mean
+KS statistic)`. Recommendations use the existing thresholds:
+below 0.40 is DO_NOT_USE, below 0.70 is CAUTION, otherwise USE.
+With few alignments every class reads DO_NOT_USE; that is the honest
+starting point, and scores move only as independent weekly alignments
+accumulate.
+
+## Running manually
+
+From the repo root with the package installed:
+
+```sh
+eve-miro market-accumulate
+```
+
+Environment: no live flags are needed (the job fetches live data
+directly and fails closed without it). Optional: `FRED_API_KEY` for the
+macro snapshot, or `FRED_MACRO_JSON` pointing at pre-fetched
+observations (see Macro context below). The job writes under
+`storage/market/` in the repo.
+
+## Macro context
+
+The weekly run records a macro snapshot alongside each run: the latest
+observation of four FRED series read by
+`src/eve_miro/providers/macro_fred.py`:
+
+- `DGS10`: 10-Year Treasury Constant Maturity Rate (percent)
+- `CPIAUCSL`: Consumer Price Index for All Urban Consumers (index)
+- `UNRATE`: Unemployment Rate (percent)
+- `FEDFUNDS`: Effective Federal Funds Rate (percent)
+
+Two ways to supply them. For local runs, export `FRED_API_KEY` (free key
+from stlouisfed.org) and the provider calls the API directly. For the
+scheduled run, whose credential lives behind the Secure Vault rather than
+the process environment, pre-fetch observations into a JSON file and point
+`FRED_MACRO_JSON` at it. The file takes precedence over the API key; a
+corrupt file is a loud soft skip (warned, run continues without macro).
+
+File schema:
+
+```json
+{
+  "DGS10": [{"date": "2026-10-01", "value": "5.24"}],
+  "CPIAUCSL": [{"date": "2026-09-01", "value": "320.1"}],
+  "UNRATE": [{"date": "2026-09-01", "value": "4.1"}],
+  "FEDFUNDS": [{"date": "2026-09-01", "value": "4.33"}]
+}
+```
+
+Pre-fetch with the fred skill CLI (machine-local; the repo never imports
+it, the JSON file is the whole interface):
+
+```sh
+for s in DGS10 CPIAUCSL UNRATE FEDFUNDS; do
+  python3 ~/workspace/skills/fred/bin/fred.py observations \
+    --series-id "$s" --limit 12 > "/tmp/fred_$s.json"
+done
+python3 - <<'EOF'
+import json
+out = {}
+for s in ["DGS10", "CPIAUCSL", "UNRATE", "FEDFUNDS"]:
+    doc = json.load(open(f"/tmp/fred_{s}.json"))
+    out[s] = [{"date": o["date"], "value": o["value"]}
+              for o in doc["observations"]]
+json.dump(out, open("/tmp/fred_macro.json", "w"), indent=2)
+EOF
+FRED_MACRO_JSON=/tmp/fred_macro.json eve-miro market-accumulate
+```
+
+## Scheduler
+
+Run weekly on Monday mornings Asia/Manila from the repo root:
+
+```sh
+cd /path/to/EVE---MIRO && eve-miro market-accumulate
+```
+
+with `FRED_API_KEY` exported when available, or `FRED_MACRO_JSON`
+pointing at a pre-fetched file (see Macro context above). The job is idempotent per
+ISO week, so overlapping or retried runs cannot duplicate records.
+The scheduled weekly run sets `JEV_ENABLED=1` to turn on Jev
+weak-signal scoring (see above); manual runs leave it off unless the
+operator opts in.
+
+## Honest limits
+
+- Trust measures scenario-class calibration against observed windows,
+  not predictive power. A high score means the scenario behaved like
+  past realizations, never that the simulator predicts prices.
+- The realized window is one draw; exogenous news is unmodeled.
+- Calibrated parameters carry the Phase 5 degeneracy caveat: several
+  distinct parameter vectors fit the historical moments about equally
+  well.
+- The simulator under-produces fat tails and deep drawdowns relative to
+  history (documented in `docs/market-calibration.md`); trust scores
+  reflect that gap rather than hiding it.

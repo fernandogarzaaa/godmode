@@ -19,6 +19,8 @@ dependencies = [
   "sqlalchemy>=2.0,<3",
   "psycopg[binary]>=3.2,<4",
   "python-multipart>=0.0.12,<1",
+  "yfinance>=0.2.40",
+  "scipy>=1.11,<2",
 ]
 
 [project.optional-dependencies]
@@ -28,15 +30,16 @@ dev = [
   "pytest-cov>=5,<7",
   "ruff>=0.6,<1",
 ]
-# MiroFish backend runtime (mirofish/backend/requirements.txt). camel-oasis
-# may need a C++ compiler; scripts/bootstrap.py preflights that.
+# MiroFish backend runtime (mirofish/backend/pyproject.toml). OASIS simulation
+# deps (camel-oasis) are intentionally NOT here: they live in
+# mirofish/simulations/ with their own lockfile because their exact pins
+# carry unfixable CVEs (Dependabot #189/#150). scripts/bootstrap.py preflights
+# the C++ compiler camel-oasis may need.
 engines = [
   "flask>=3.0.0",
   "flask-cors>=6.0.0",
   "openai>=1.0.0",
   "zep-cloud==3.25.0",
-  "camel-oasis==0.2.5",
-  "camel-ai==0.2.78",
   "PyMuPDF>=1.24.0",
   "charset-normalizer>=3.0.0",
   "chardet>=5.0.0",
@@ -57,7 +60,8 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["eve_miro*", "marketsim"]
 
 [tool.setuptools.package-data]
 eve_miro = ["api/static/*"]
@@ -65,7 +69,7 @@ eve_miro = ["api/static/*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 filterwarnings = [
   "ignore::DeprecationWarning",

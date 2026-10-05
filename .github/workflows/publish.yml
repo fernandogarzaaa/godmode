@@ -1,11 +1,12 @@
 name: Publish
 
-# Publishes the godmode npm package when a release tag (vX.Y.Z) is pushed.
-# This closes the registry drift where the README-advertised
-# `npm i -g godmode` installed a stale 0.0.3 while the repo was at 1.0.0.
+# Publishes the @fernandogarzaaa/godmode npm package when a release tag (vX.Y.Z) is pushed.
+# The unscoped `godmode` name on npm is owned by an unrelated third-party
+# package, so this repo publishes under Inan's scope; the README install
+# line (`npm i -g @fernandogarzaaa/godmode`) matches.
 #
 # Requires a repo secret named NPM_TOKEN holding an npm automation token
-# with publish access to the `godmode` package.
+# with publish access to the `@fernandogarzaaa/godmode` package.
 
 on:
   push:
@@ -66,7 +67,7 @@ jobs:
       - name: Check npm auth
         run: |
           if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "::error::NPM_TOKEN is not configured. Create an npm automation token (npmjs.com -> Access Tokens -> Generate New Token -> Automation) with publish access to godmode, add it as a repo secret named NPM_TOKEN, then push the release tag again."
+            echo "::error::NPM_TOKEN is not configured. Create an npm automation token (npmjs.com -> Access Tokens -> Generate New Token -> Automation) with publish access to @fernandogarzaaa/godmode, add it as a repo secret named NPM_TOKEN, then push the release tag again."
             exit 1
           fi
 

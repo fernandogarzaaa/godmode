@@ -5,7 +5,7 @@ Standalone universal plugin + MCP product engine: **Genesis** (evaluation & assu
 ## Install
 
 ```bash
-npm i -g godmode            # or clone fernandogarzaaa/godmode
+npm i -g @fernandogarzaaa/godmode  # or clone fernandogarzaaa/godmode
 godmode doctor              # all vendored engines present?
 godmode                     # opens browser console (CLI + Live Trace) on 127.0.0.1 auto-port
 ```

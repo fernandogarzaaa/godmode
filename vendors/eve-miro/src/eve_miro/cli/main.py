@@ -18,6 +18,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from eve_miro.cli.market_accumulate import cmd_market_accumulate
+from eve_miro.cli.market_calibrate import cmd_market_calibrate
+from eve_miro.cli.market_sim import cmd_market_sim
 from eve_miro.paths import REPO_ROOT
 
 PROG = "eve-miro"
@@ -109,6 +112,16 @@ Usage:
   eve-miro config set KEY  set a key (value from EVE_MIRO_VALUE or getpass)
   eve-miro serve           start MiroFish Flask (:5001)
   eve-miro run             live tiny closed loop (EVE_MIRO_ENGINES=in-tree, fail closed)
+  eve-miro market-sim      offline market scenario run (fixtures): ground t0,
+                           run marketsim shock, align vs held-out t1, print trust
+  eve-miro market-calibrate fit|validate
+                           MSM calibration of marketsim archetypes (fit) and
+                           holdout validation (validate); see docs/market-calibration.md
+  eve-miro market-accumulate
+                           weekly trust accumulation from live data: fetch live
+                           bars, run all scenarios with calibrated params, align
+                           vs the trailing 20-day window, append to the trust
+                           ledger; see docs/market-accumulation.md
   eve-miro api             uvicorn eve_miro.api.main:app :8000
 
 Setup flags (non-interactive):
@@ -127,7 +140,7 @@ Providers (OpenAI-compatible HTTP only):
   azure        --base-url required
   custom       --base-url required
 
-Python split: fabric is 3.12+ (.venv). OASIS is 3.11 (mirofish/.venv).
+Python split: fabric is 3.12+ (.venv). OASIS is 3.11 (mirofish/simulations/.venv).
 """
 
 
@@ -150,7 +163,8 @@ def fabric_python() -> Path:
 
 
 def oasis_python() -> Path | None:
-    vpy = venv_python(REPO_ROOT / "mirofish" / ".venv")
+    # OASIS deps are isolated in mirofish/simulations/.venv (decoupled from the backend)
+    vpy = venv_python(REPO_ROOT / "mirofish" / "simulations" / ".venv")
     if vpy.is_file():
         return vpy
     found = shutil.which("python3.11") or shutil.which("python311")
@@ -316,7 +330,7 @@ def cmd_doctor(_args=None) -> int:
     ok = True
     py311 = oasis_python()
     if py311 is None:
-        print("FAIL  python 3.11 not found (OASIS / camel-oasis needs 3.10-3.11 at mirofish/.venv)")
+        print("FAIL  python 3.11 not found (OASIS / camel-oasis needs 3.10-3.11 at mirofish/simulations/.venv)")
         ok = False
     else:
         code = "import oasis, sys; print(sys.version.split()[0])"
@@ -523,13 +537,13 @@ def cmd_serve(_args=None) -> int:
     if not script.is_file():
         print("error: missing %s" % script, file=sys.stderr)
         return 1
-    for candidate in (REPO_ROOT / "mirofish" / ".venv", REPO_ROOT / ".venv"):
+    for candidate in (REPO_ROOT / "mirofish" / "backend" / ".venv", REPO_ROOT / ".venv"):
         py = venv_python(candidate)
         if py.is_file():
             print("starting MiroFish with %s (%s)" % (py, script))
             proc = subprocess.run([str(py), str(script)], check=False)
             return int(proc.returncode)
-    print("error: no mirofish/.venv or .venv python found", file=sys.stderr)
+    print("error: no mirofish/backend/.venv or .venv python found", file=sys.stderr)
     return 1
 
 
@@ -578,6 +592,9 @@ COMMANDS = {
     "config": cmd_config,
     "serve": cmd_serve,
     "run": cmd_run,
+    "market-sim": cmd_market_sim,
+    "market-calibrate": cmd_market_calibrate,
+    "market-accumulate": cmd_market_accumulate,
     "api": cmd_api,
 }
 

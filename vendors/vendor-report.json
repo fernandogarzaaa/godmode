@@ -25,7 +25,7 @@
         "LICENSE",
         ".claude-plugin"
       ],
-      "sha": "af9c797476d8f64559a0477918be6b10d076a5ec"
+      "sha": "11ec949db0a2565fd473927ab5e4771efaa4593c"
     },
     {
       "dest": "vendors/eve",
@@ -91,7 +91,7 @@
         "CHANGELOG.md",
         ".github"
       ],
-      "sha": "910b00b4a61ee201a80b772923f40b9de438bef1"
+      "sha": "63e99abd77450928811f45319cf18f272b9baaf5"
     },
     {
       "dest": "vendors/eve-miro",
@@ -127,5 +127,5 @@
       "sha": "0104cabdb70cd6850fcfb29acb20539d1c293453"
     }
   ],
-  "at": "2026-10-05T23:41:36.513Z"
+  "at": "2026-10-07T22:38:48.694Z"
 }

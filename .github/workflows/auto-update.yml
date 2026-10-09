@@ -120,7 +120,7 @@ jobs:
             gh pr close "$n" --comment "Superseded: the latest auto-update run opens a fresh sync PR that replaces this one."
           done
       - name: Open update PR
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           # Default GITHUB_TOKEN works once the repo setting
           # "Allow GitHub Actions to create and approve pull requests" is ON.

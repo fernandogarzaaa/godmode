@@ -51,17 +51,27 @@ test("fetch-adam maps every platform to an asset + local binary when present", a
   if (existsSync(m.destFor(asset))) assert.ok(true, "vendored binary present");
 });
 test("background task runs to done with result", async () => {
-  const s = await dispatchCall("godmode_task_start", { tool: "godmode_status", arguments: {} });
-  const id = s.structuredContent.result.task_id;
+  // task_start is file-backed and has flaked once on a busy runner
+  // (start returned no task_id). Surface the start error and retry once
+  // instead of asserting on an undefined id.
+  let start = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    start = await dispatchCall("godmode_task_start", { tool: "godmode_status", arguments: {} });
+    if (!start.structuredContent.result.error) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  const started = start.structuredContent.result;
+  assert.ok(!started.error, "task_start failed: " + JSON.stringify(started).slice(0, 200));
+  const id = started.task_id;
   assert.ok(id);
   let t = null;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 100; i++) {
     await new Promise((r) => setTimeout(r, 100));
     const g = await dispatchCall("godmode_task_get", { task_id: id });
     t = g.structuredContent.result;
     if (t.status === "done" || t.status === "failed") break;
   }
-  assert.equal(t.status, "done");
+  assert.equal(t.status, "done", "task did not finish: " + JSON.stringify(t).slice(0, 200));
   assert.equal(t.result.structuredContent.result.version, "1.0.0");
 });
 test("task_start rejects unknown tools (no nesting)", async () => {

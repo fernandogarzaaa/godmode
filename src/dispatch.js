@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { adamBinaryStatus } from "./adam-client.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const V = (p) => join(root, "vendors", p);
@@ -41,11 +42,7 @@ export function failEve() {
   return fail("eve", "bin/eve.js + dist missing; build vendors/eve");
 }
 export function adamBin() {
-  const cands = [
-    V("adam/target/release/adam-mcp"), V("adam/target/release/adam-mcp.exe"),
-    V("adam/bin/adam-mcp"),
-  ];
-  return cands.find((p) => existsSync(p)) ?? null;
+  return adamBinaryStatus().bin;
 }
 export function skeinSrc() {
   return existsSync(V("skein/src/skein/cli.py")) ? V("skein/src") : null;
@@ -69,7 +66,7 @@ export const dispatch = {
       engines: {
         genesis: genesisEntry() ? "vendored" : "vendored-unbuilt",
         eve: eveEntry() ? "vendored" : "vendored-unbuilt",
-        adam: adamBin() ? "vendored" : "vendored-unbuilt",
+        adam: (() => { const a = adamBinaryStatus(); return a.bin ? "vendored" : a.status === "wrong-arch" ? "unavailable-wrong-arch" : "vendored-unbuilt"; })(),
         skein: skeinSrc() ? "vendored" : "missing",
         "eve-miro": miroSrc() ? "vendored" : "missing",
       },
@@ -87,13 +84,17 @@ export const dispatch = {
       const m = r.output.match(/Ledger: entry (\w+)/);
       if (m) ledgerSummary({ kind: "genesis.audit", suite, verdict: /VERDICT:\s+(\S+)/.exec(r.output)?.[1], ledger_entry: m[1] });
     }
-    return { suite, ledger, ...r };
+    // genesis exits 1/2 for EXPLOITABLE/UNRELIABLE verdicts: that is a result, not a tool failure.
+    const verdict = /VERDICT:\s+(\S+)/.exec(r.output || "")?.[1];
+    return verdict ? { suite, ledger, ...r, ok: true, verdict } : { suite, ledger, ...r };
   },
   validate_experience({ url = "mock:", persona = "curious-explorer", seed = 7 } = {}) {
     const e = eveEntry();
     if (!e) return fail("eve", "bin/eve.js + dist missing; build vendors/eve");
     const r = run("node", [e, "run", url, "--persona", persona, "--seed", String(seed), "--quiet"]);
-    return { url, persona, seed, ...r, report: ".godmode/eve-report (see godmode_report)" };
+    const out = { url, persona, seed, ...r, report: join(process.cwd(), ".eve-output", "report.html") };
+    if (!r.ok) out.error = "eve_run_failed";
+    return out;
   },
   memory({ op, query = "", kind = "episodic", content = "", organism_id = "default" } = {}) {
     const b = adamBin();

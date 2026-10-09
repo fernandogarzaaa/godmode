@@ -25,7 +25,7 @@
         "LICENSE",
         ".claude-plugin"
       ],
-      "sha": "35b043c4bde981dac6d6f331b02a3822b4733ab8"
+      "sha": "8d282ab43e0000778926a36e5540ef06e8db238e"
     },
     {
       "dest": "vendors/eve",
@@ -77,7 +77,7 @@
         ".claude-plugin",
         ".mcp.json"
       ],
-      "sha": "facd532c6d1dab7b6d558a7d3ee73b357109100e"
+      "sha": "598d036a303161683b7e3cb7e0daf1ec49ae0098"
     },
     {
       "dest": "vendors/skein",
@@ -124,8 +124,8 @@
         ".github",
         "mirofish[AGPL-3.0, see NOTICE.md]"
       ],
-      "sha": "0eded316b30541ee4c350bb08c3bab861c45349d"
+      "sha": "b408f44d9849a2c51fda835f0d20fd2c5fc02650"
     }
   ],
-  "at": "2026-10-09T07:49:48.534Z"
+  "at": "2026-10-09T09:00:29.769Z"
 }

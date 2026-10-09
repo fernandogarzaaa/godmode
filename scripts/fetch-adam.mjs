@@ -13,6 +13,8 @@ export function assetFor(platform = process.platform, arch = process.arch) {
   if (platform === "win32") return "adam-mcp-win-x64.exe";
   if (platform === "darwin" && arch === "arm64") return "adam-mcp-darwin-arm64";
   if (platform === "linux" && arch === "x64") return "adam-mcp-linux-x64";
+  if (platform === "linux" && arch === "arm64") return "adam-mcp-linux-arm64";
+  if (platform === "darwin" && arch === "x64") return "adam-mcp-darwin-x64";
   return null;
 }
 export function destFor(asset) {

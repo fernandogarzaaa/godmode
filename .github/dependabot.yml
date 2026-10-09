@@ -3,3 +3,9 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+  # Root package only: vendors/ is refreshed by the auto-update workflow
+  # (scripts/sync-vendors.mjs), so their manifests are not tracked here.
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5

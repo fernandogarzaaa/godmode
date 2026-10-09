@@ -15,7 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults: { run: { working-directory: vendors/adam } }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -36,5 +36,5 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with: { path: dist-adam, merge-multiple: true }
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with: { files: dist-adam/* }

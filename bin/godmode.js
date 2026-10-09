@@ -76,6 +76,14 @@ if (!cmd) {
   ];
   let fail = 0;
   for (const [n, ok] of checks) { console.log((ok ? "ok  " : "FAIL") + "  " + n); if (!ok) fail++; }
+  // Optional engines: report, don't fail the install.
+  const { adamBinaryStatus } = await import("../src/adam-client.js");
+  const a = adamBinaryStatus();
+  console.log((a.bin ? "ok  " : "warn") + "  adam-mcp for " + process.platform + "-" + process.arch + (a.bin ? "" : " — " + a.detail + " (memory/beliefs/genome tools unavailable)"));
+  for (const dep of ["pngjs", "better-sqlite3"]) {
+    let ok = true; try { await import(dep); } catch { ok = false; }
+    console.log((ok ? "ok  " : "warn") + "  " + dep + (ok ? "" : dep === "pngjs" ? " — EVE runs will fail; npm install" : " — Genesis ledger disabled; npm install better-sqlite3"));
+  }
   process.exit(fail ? 1 : 0);
 } else if (cmd === "mods") {
   console.log("mods: mods/policy-gates (enabled) — see godmode.config.yaml; toggle via mods/<name>/mod.json {enabled}");

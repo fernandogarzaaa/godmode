@@ -24,7 +24,7 @@ jobs:
         run: >
           echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
           | ./target/${{ matrix.target }}/release/adam-mcp${{ matrix.ext }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}
           path: vendors/adam/target/${{ matrix.target }}/release/adam-mcp${{ matrix.ext }}

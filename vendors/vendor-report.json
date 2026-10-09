@@ -77,7 +77,7 @@
         ".claude-plugin",
         ".mcp.json"
       ],
-      "sha": "facd532c6d1dab7b6d558a7d3ee73b357109100e"
+      "sha": "bd58061816bef45d9f3ca353568f9e8afc305526"
     },
     {
       "dest": "vendors/skein",
@@ -127,5 +127,5 @@
       "sha": "0eded316b30541ee4c350bb08c3bab861c45349d"
     }
   ],
-  "at": "2026-10-09T07:49:48.534Z"
+  "at": "2026-10-09T08:27:36.268Z"
 }

@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dispatch } from "./dispatch.js";
+import { dispatch, eveEntry, runNode, failEve } from "./dispatch.js";
 import { emitTrace, newTraceId, shaShort, dataDir, tracePath } from "./trace.js";
 import { loadMods } from "./mods.js";
 import { taskCreate, taskGet, taskList, taskFinish } from "./tasks.js";
@@ -17,7 +17,7 @@ export const TOOL_DEFS = [
   { name: "godmode_recall", description: "Query ADAM memory + prior decisions (real stdio call to vendored adam-mcp)", inputSchema: { type: "object", properties: { query: { type: "string" }, kind: { type: "string" }, top_k: { type: "number" }, organism_id: { type: "string" } }, required: ["query"] }, annotations: { readOnly: true, idempotent: true } },
   { name: "godmode_beliefs", description: "List ADAM beliefs or form one from evidence (real stdio call; statement form creates a new belief)", inputSchema: { type: "object", properties: { statement: { type: "string" }, origin: { type: "string" }, organism_id: { type: "string" } } }, annotations: { readOnly: false, idempotent: false } },
   { name: "godmode_genome", description: "Current ADAM genome payload (values, goals, capabilities, policies)", inputSchema: { type: "object", properties: { organism_id: { type: "string" } } }, annotations: { readOnly: true, idempotent: true } },
-  { name: "godmode_mcp_eval", description: "EVE mcp-eval: schema, conformance + fuzz oracles against an MCP server target", inputSchema: { type: "object", properties: { target: { type: "string" } }, required: ["target"] }, annotations: { readOnly: true, idempotent: true } },
+  { name: "godmode_mcp_eval", description: "EVE mcp-eval: schema, conformance + fuzz oracles against an MCP server target", inputSchema: { type: "object", properties: { target: { type: "string", description: "Command that starts the MCP server over stdio, e.g. \"node server.js\"" }, fuzz: { type: "boolean", description: "Run robustness fuzzing (default true; it calls every tool with junk args and can be slow)" } }, required: ["target"] }, annotations: { readOnly: true, idempotent: true } },
   { name: "godmode_validate_experience", description: "Run EVE human-loop simulation (personas, seeded, evidence-backed)", inputSchema: { type: "object", properties: { url: { type: "string" }, persona: { type: "string" }, goal: { type: "string" }, seed: { type: "number" } } }, annotations: { readOnly: true, idempotent: true } },
   { name: "godmode_audit_claim", description: "Genesis: evaluate claim + adversarially audit verifier (SOUND/EXPLOITABLE)", inputSchema: { type: "object", properties: { suite: { type: "string" }, verifier: { type: "string" }, spec: { type: "string" } } }, annotations: { readOnly: true, idempotent: true } },
   { name: "godmode_compare", description: "Genesis compare/regression between two runs", inputSchema: { type: "object", properties: { run_a: { type: "string" }, run_b: { type: "string" } } }, annotations: { readOnly: true, idempotent: true } },
@@ -39,7 +39,8 @@ export async function dispatchCall(name, args = {}, ctx = {}) {
   if (name === "godmode_evolve" && (a.action === "accept" || a.action === "apply") && a.confirm !== true && !ctx.headlessBypass) {
     const dur = Date.now() - t0;
     emitTrace({ traceId, tool: name, argsHash: shaShort(JSON.stringify(a)), durationMs: dur, resultSummary: "input_required:confirm" });
-    return { resultType: "input_required", traceId, inputRequests: [{ id: "confirm-evolve", type: "elicitation", message: "Accepting a genome mutation is destructive. Confirm?", schema: { confirm: "boolean" } }], requestState: shaShort(traceId + name) };
+    const msg = "Accepting a genome mutation is destructive. Re-call godmode_evolve with confirm: true to proceed.";
+    return { resultType: "input_required", traceId, content: [{ type: "text", text: msg }], structuredContent: { tool: name, ok: false, result: { input_required: "confirm" } }, inputRequests: [{ id: "confirm-evolve", type: "elicitation", message: "Accepting a genome mutation is destructive. Confirm?", schema: { confirm: "boolean" } }], requestState: shaShort(traceId + name) };
   }
   let result;
   try {
@@ -50,8 +51,8 @@ export async function dispatchCall(name, args = {}, ctx = {}) {
       case "godmode_beliefs": result = await adamCall("adam_beliefs", a.statement ? { statement: a.statement, origin: a.origin || "observation" } : {}, a.organism_id); break;
       case "godmode_genome": result = await adamCall("adam_genome", {}, a.organism_id); break;
       case "godmode_mcp_eval": {
-        const e = dispatch.eveEntry();
-        result = e ? dispatch.runNode(e, ["mcp-eval", a.target]) : dispatch.failEve();
+        const e = eveEntry();
+        result = e ? runNode(e, ["mcp-eval", a.target, ...(a.fuzz === false ? ["--no-fuzz"] : [])]) : failEve();
         break;
       }
       case "godmode_validate_experience": result = dispatch.validate_experience(a); break;
@@ -84,7 +85,7 @@ export async function dispatchCall(name, args = {}, ctx = {}) {
   const out = {
     resultType: "complete", traceId,
     content: [{ type: "text", text: JSON.stringify(result).slice(0, 4000) }],
-    structuredContent: { tool: name, ok: !result?.error, result },
+    structuredContent: { tool: name, ok: !result?.error && result?.ok !== false && (result?._adam === undefined || result._adam === "ok"), result },
   };
   emitTrace({ traceId, tool: name, argsHash: shaShort(JSON.stringify(args)), handles: a.organism_id ?? a.node ?? "", durationMs: Date.now() - t0, resultSummary: JSON.stringify(result).slice(0, 200), modApplied: mods.map((m) => m.name).join(",") });
   return out;

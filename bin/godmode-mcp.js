@@ -46,28 +46,61 @@ if (args.includes("--http")) {
   });
   server.listen(port, "127.0.0.1", () => console.log(`godmode-mcp http on http://127.0.0.1:${port}`));
 } else {
-  // stdio: newline-delimited JSON-RPC {id, method, params}
+  // stdio: newline-delimited JSON-RPC 2.0 per the MCP stdio transport.
+  // Implements the lifecycle real MCP clients require (initialize ->
+  // notifications/initialized), never answers notifications, and reports
+  // unknown methods as JSON-RPC errors instead of fake results.
+  const SERVER_INFO = { name: "godmode", version: "1.0.0" };
+  const FALLBACK_PROTOCOL = "2025-06-18";
+  const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+  const replyError = (id, code, message) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
+  async function handle(msg) {
+    const { id, method, params } = msg;
+    const isNotification = id === undefined || id === null;
+    if (typeof method !== "string") return; // a response to us, or junk: ignore
+    if (isNotification) return; // notifications/initialized, notifications/cancelled, ...
+    try {
+      let result;
+      switch (method) {
+        case "initialize": {
+          const d = discover();
+          result = {
+            protocolVersion: typeof params?.protocolVersion === "string" ? params.protocolVersion : FALLBACK_PROTOCOL,
+            capabilities: { tools: { listChanged: false }, experimental: d.capabilities.extensions },
+            serverInfo: SERVER_INFO,
+            instructions: "GodMode: call godmode_status first; long tools can run via godmode_task_start + godmode_task_get.",
+          };
+          break;
+        }
+        case "ping": result = {}; break;
+        case "server/discover": result = discover(); break;
+        case "tools/list": result = toolsList(); break;
+        case "resources/list": result = { resources: [] }; break;
+        case "prompts/list": result = { prompts: [] }; break;
+        case "tasks/get": result = { resultType: "complete", task: taskGet(params?.task_id) }; break;
+        case "tools/call": {
+          const out = await dispatchCall(params?.name, params?.arguments ?? {});
+          result = { ...out, isError: out?.structuredContent?.ok === false };
+          break;
+        }
+        default: return replyError(id, -32601, `Method not found: ${method}`);
+      }
+      reply(id, result);
+    } catch (e) {
+      replyError(id, -32603, String(e).slice(0, 200));
+    }
+  }
   let buf = "";
   process.stdin.setEncoding("utf8");
-  process.stdin.on("data", async (chunk) => {
+  process.stdin.on("data", (chunk) => {
     buf += chunk;
     let idx;
     while ((idx = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
       if (!line) continue;
-      try {
-        const msg = JSON.parse(line);
-        const { id, method, params } = msg;
-        let result;
-        if (method === "server/discover") result = discover();
-        else if (method === "tools/list") result = toolsList();
-        else if (method === "tasks/get") result = { resultType: "complete", task: taskGet(params?.task_id) };
-        else if (method === "tools/call") result = await dispatchCall(params?.name, params?.arguments ?? {});
-        else result = { error: "unknown_method", method };
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
-      } catch (e) {
-        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32603, message: String(e).slice(0, 200) } }) + "\n");
-      }
+      let msg;
+      try { msg = JSON.parse(line); } catch { replyError(null, -32700, "Parse error"); continue; }
+      handle(msg);
     }
   });
 }

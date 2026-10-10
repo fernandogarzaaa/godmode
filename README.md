@@ -10,6 +10,12 @@ godmode doctor              # all vendored engines present?
 godmode                     # opens browser console (CLI + Live Trace) on 127.0.0.1 auto-port
 ```
 
+From a clone: `npm install && node bin/godmode.js doctor`. `doctor` also reports optional engines:
+the committed `adam-mcp` prebuilts are linux-x64 and win-x64 only, so on other CPUs (e.g. linux-arm64,
+Apple Silicon) the memory/beliefs/genome tools return `adam_unavailable` until you build ADAM:
+`cd vendors/adam && CARGO_TARGET_DIR=/tmp/adam-target cargo build --release -p adam-mcp` and set
+`GODMODE_ADAM_BIN=/tmp/adam-target/release/adam-mcp`.
+
 MCP clients (Claude/Codex/OpenCode/Cursor/VSCode): point at `bin/godmode-mcp.js` (stdio) or `godmode-mcp --http 8787`. Manifests: `.claude-plugin/`, `.codex/skills/godmode/`, `.opencode/plugin.json`, `mcpServers.json`.
 
 ## Use

@@ -94,3 +94,31 @@ test("godmode_remember persists through real adam-mcp when present", async () =>
   if (res._adam === "ok") assert.equal(res.tool, "adam_memory_store");
   else assert.ok(["unavailable", "spawn-error", "exited", "timeout", "rpc-error"].includes(res._adam), "explicit not silent");
 });
+test("stdio server completes the MCP handshake with the official SDK client", async () => {
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { StdioClientTransport } = await import("@modelcontextprotocol/sdk/client/stdio.js");
+  const { fileURLToPath } = await import("node:url");
+  const bin = fileURLToPath(new URL("../bin/godmode-mcp.js", import.meta.url));
+  const c = new Client({ name: "godmode-test", version: "0.0.0" });
+  await c.connect(new StdioClientTransport({ command: process.execPath, args: [bin], stderr: "ignore" }));
+  try {
+    assert.equal(c.getServerVersion().name, "godmode");
+    const { tools } = await c.listTools();
+    assert.ok(tools.find((t) => t.name === "godmode_status"));
+    const r = await c.callTool({ name: "godmode_status", arguments: {} });
+    assert.equal(r.isError, false);
+    assert.equal(r.structuredContent.result.version, "1.0.0");
+  } finally { await c.close(); }
+});
+test("godmode_mcp_eval dispatches to EVE instead of throwing", async () => {
+  const r = await dispatchCall("godmode_mcp_eval", { target: "definitely-not-a-server" });
+  assert.notEqual(r.structuredContent.result.error, "handler_failed");
+});
+test("adam binary selection never execs a prebuilt for another CPU", async () => {
+  const { adamBinaryStatus, binaryArch } = await import("../src/adam-client.js");
+  const st = adamBinaryStatus();
+  if (st.bin && process.platform === "linux") {
+    const a = binaryArch(st.bin);
+    assert.ok(a === null || a === "script" || a === process.arch, `selected ${st.bin} is ${a}`);
+  } else if (!st.bin) assert.ok(st.detail);
+});

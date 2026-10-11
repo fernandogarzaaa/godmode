@@ -63,6 +63,8 @@ if (!cmd) {
   }
   const out = await dispatchCall(tool, args, { headlessBypass: rest.includes("--yes") });
   console.log(JSON.stringify(out, null, 2));
+  const { adamShutdown } = await import("../src/adam-client.js");
+  await adamShutdown();
 } else if (cmd === "doctor") {
   const checks = [
     ["node>=20", Number(process.versions.node.split(".")[0]) >= 20],

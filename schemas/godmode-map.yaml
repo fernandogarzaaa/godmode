@@ -12,19 +12,19 @@ tools:
   - { name: godmode_audit_claim, from: [genesis(audit,evaluate,trust,gate,attest)], args: { spec_or_verifier, suite }, out: { verdict, rates, findings }, ledger: true }
   - { name: godmode_compare, from: [genesis(compare,regression)], args: { run_a, run_b }, out: { delta } }
   - { name: godmode_orchestrate, from: [skein(graph,claim,worktree,verify,supervisor,sync)], args: { op, node, agent_id }, out: { graph, evidence } }
-  - { name: godmode_world_simulate, from: [eve-miro(closed_loop,world,ledger)], args: { scenario }, out: { ledger_entry, trust } }
-  - { name: godmode_evolve, from: [adam(evolve,propose,accept,reject)+eve(measure)], args: { signals_or_proposal, organism_id }, out: { proposal, fitness }, destructive_confirm: true }
-  - { name: godmode_report, from: [eve(reporting), genesis(report-html), miro(ledger)], args: { ref }, out: { html_uri, markdown } }
+  - { name: godmode_world_simulate, from: [eve-miro(closed_loop,world,ledger)], args: { scenario }, out: { ledger_entry, trust }, requires: eve-miro-python-env, note: "fails closed (engine_not_configured) until the eve-miro Python env can import eve_miro" }
+  - { name: godmode_evolve, from: [adam(propose_mutation,accept_mutation,reject_mutation,evolve)], args: { action, proposal_id, kind, field, suggested_value, rationale, evidence, organism_id }, out: { proposal_id, result }, destructive_confirm: true }
+  - { name: godmode_report, from: [eve(reporting), genesis(ledger)], args: { ref }, out: { eve: {html_uri, markdown}, genesis: {entries, latest}, trace_ledger } }
   - { name: godmode_task_start, from: [core(tasks)], args: { tool, arguments }, out: { task_id }, long_running: true }
   - { name: godmode_task_get, from: [core(tasks)], args: { task_id }, out: { status, result } }
 resources:
-  - { uri: genome://current, from: adam-kernel }
-  - { uri: "memory://{kind}/{id}", from: adam-memory/eventlog }
-  - { uri: ledger://genesis, from: genesis-ledger }
-  - { uri: audit://adam, from: adam-governance }
-  - { uri: graph://skein/current, from: skein-graph }
-  - { uri: world://t0, from: eve-miro-world }
-  - { uri: "report://eve/{id}", from: eve-reporting }
+  - { uri: genome://current, from: adam-kernel, live: true }
+  - { uri: "memory://{kind}/{id}", from: adam-memory/eventlog, live: false, note: "template only; use godmode_recall" }
+  - { uri: ledger://genesis, from: genesis-ledger, live: true }
+  - { uri: audit://adam, from: adam-governance, live: false, note: "use godmode_evolve action=status + adam_history via MCP client" }
+  - { uri: graph://skein/current, from: skein-graph, live: true }
+  - { uri: world://t0, from: eve-miro-world, live: false, note: "eve-miro engine not configured; see godmode_world_simulate" }
+  - { uri: "report://eve/latest", from: eve-reporting, live: true, note: "report://eve/{id} resolves only the latest run" }
 prompts:
   - { name: /godmode, from: adam-skills/godmode + eve-skills, loop: recall-before/verify-while/store-after }
   - { name: /validate-ux, from: eve-skill }

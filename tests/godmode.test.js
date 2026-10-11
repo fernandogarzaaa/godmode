@@ -1,8 +1,13 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert";
 import { existsSync } from "node:fs";
 import { dispatchCall, toolsList, discover } from "../src/server.js";
 import { protectedResourceDoc, checkBearer, authRequired } from "../src/auth.js";
+
+after(async () => {
+  const { adamShutdown } = await import("../src/adam-client.js");
+  await adamShutdown();
+});
 
 test("discover pins 2026-07-28 + tasks ext", () => {
   const d = discover();
@@ -121,4 +126,102 @@ test("adam binary selection never execs a prebuilt for another CPU", async () =>
     const a = binaryArch(st.bin);
     assert.ok(a === null || a === "script" || a === process.arch, `selected ${st.bin} is ${a}`);
   } else if (!st.bin) assert.ok(st.detail);
+});
+test("adam isError surfaces as an error, never fake ok", async () => {
+  const { adamCall, adamBinaryStatus } = await import("../src/adam-client.js");
+  if (!adamBinaryStatus().bin) return; // hermetic CI without the prebuilt: nothing to assert
+  const r = await adamCall("adam_propose_mutation", {});
+  assert.equal(r._adam, "rpc-error");
+  assert.ok(r.error, "isError text must surface");
+});
+test("orchestrate auto-detects python3 without GODMODE_PYTHON", async () => {
+  const saved = process.env.GODMODE_PYTHON;
+  delete process.env.GODMODE_PYTHON;
+  try {
+    const r = await dispatchCall("godmode_orchestrate", { op: "status" });
+    assert.equal(r.structuredContent.ok, true, JSON.stringify(r.structuredContent.result).slice(0, 200));
+  } finally { if (saved !== undefined) process.env.GODMODE_PYTHON = saved; }
+});
+test("compare runs real genesis compare on two bundles", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { dispatch } = await import("../src/dispatch.js");
+  const base = mkdtempSync(join(tmpdir(), "gcmp-"));
+  const mk = (name, verdict, metrics) => {
+    const d = join(base, name); mkdirSync(join(d, "treatment"), { recursive: true });
+    writeFileSync(join(d, "verdict.json"), JSON.stringify({ verdict }));
+    writeFileSync(join(d, "treatment", "metrics.json"), JSON.stringify(metrics));
+    return d;
+  };
+  const a = mk("a", "TRUSTED", [{ metric: "accuracy", value: 0.8 }]);
+  const b = mk("b", "TRUSTED", [{ metric: "accuracy", value: 0.9 }]);
+  const r = dispatch.compare({ run_a: a, run_b: b });
+  assert.equal(r.ok, true, r.output);
+  assert.ok(r.output.includes("accuracy") && r.output.includes("0.9"));
+  const bad = dispatch.compare({ run_a: join(base, "nope"), run_b: b });
+  assert.equal(bad.error, "missing_run");
+});
+test("world_simulate fails closed with an honest error", async () => {
+  const r = await dispatchCall("godmode_world_simulate", {});
+  assert.equal(r.structuredContent.ok, false);
+  assert.equal(r.structuredContent.result.error, "engine_not_configured");
+});
+test("report returns real artifacts", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { dispatch } = await import("../src/dispatch.js");
+  const cwd = process.cwd();
+  const base = mkdtempSync(join(tmpdir(), "grep-"));
+  mkdirSync(join(base, ".eve-output"), { recursive: true });
+  writeFileSync(join(base, ".eve-output", "report.md"), "# hello report");
+  process.chdir(base);
+  try {
+    const r = await dispatch.report({});
+    assert.ok(r.eve.markdown.includes("hello report"));
+    assert.equal(r.eve.html_uri, null);
+  } finally { process.chdir(cwd); }
+});
+test("evolve validates action before touching the binary", async () => {
+  const bad = await dispatchCall("godmode_evolve", { action: "frobnicate", confirm: true });
+  assert.equal(bad.structuredContent.result.error, "unknown_action");
+  const nokind = await dispatchCall("godmode_evolve", { action: "propose", confirm: true });
+  assert.equal(nokind.structuredContent.result.error, "missing_kind");
+});
+test("resources list and read the live artifacts", async () => {
+  const { resourcesList, resourcesRead } = await import("../src/server.js");
+  const uris = resourcesList().resources.map((r) => r.uri);
+  assert.ok(uris.includes("ledger://genesis"));
+  assert.ok(uris.includes("report://eve/latest"));
+  assert.ok(uris.includes("genome://current"));
+  assert.ok(uris.includes("graph://skein/current"));
+  const led = await resourcesRead("ledger://genesis");
+  assert.equal(led.contents[0].uri, "ledger://genesis");
+  let threw = false;
+  try { await resourcesRead("nope://x"); } catch { threw = true; }
+  assert.ok(threw, "unknown resource must throw");
+});
+test("evolve propose -> accept works in one process (persistent adam session)", async () => {
+  const { adamBinaryStatus } = await import("../src/adam-client.js");
+  if (!adamBinaryStatus().bin) return;
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const saved = process.env.GODMODE_DATA_DIR;
+  process.env.GODMODE_DATA_DIR = mkdtempSync(join(tmpdir(), "gevo-"));
+  try {
+    const p = await dispatchCall("godmode_evolve", { action: "propose", kind: "amend_genome", field: "preferences.theme", suggested_value: "dark", rationale: "test" });
+    assert.equal(p.structuredContent.ok, true, JSON.stringify(p.structuredContent.result).slice(0, 300));
+    const pid = JSON.parse(p.structuredContent.result.result[0].text).id;
+    const a = await dispatchCall("godmode_evolve", { action: "accept", proposal_id: pid, confirm: true });
+    assert.equal(a.structuredContent.ok, true, JSON.stringify(a.structuredContent.result).slice(0, 300));
+    const g = await dispatchCall("godmode_genome", {});
+    const genome = JSON.parse(g.structuredContent.result.result[0].text);
+    assert.equal(genome.preferences.theme, "dark");
+  } finally {
+    if (saved === undefined) delete process.env.GODMODE_DATA_DIR; else process.env.GODMODE_DATA_DIR = saved;
+    const { adamShutdown } = await import("../src/adam-client.js");
+    await adamShutdown(); // fresh session so the temp data dir is not reused
+  }
 });

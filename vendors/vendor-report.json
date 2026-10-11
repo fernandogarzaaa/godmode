@@ -55,7 +55,7 @@
         ".codex",
         ".claude-plugin"
       ],
-      "sha": "26516424c42045fbe0bf8dd362b2cc6f4db2328b"
+      "sha": "1c1b8b54c55107e700e351a928c6c49245d9a1dc"
     },
     {
       "dest": "vendors/adam",
@@ -91,7 +91,7 @@
         "CHANGELOG.md",
         ".github"
       ],
-      "sha": "b2744f235b7302564f7b9d52090684c33be197f8"
+      "sha": "eb477c8290aecb67542b3c934c9a5e2cbeafe9c1"
     },
     {
       "dest": "vendors/eve-miro",
@@ -124,8 +124,8 @@
         ".github",
         "mirofish[AGPL-3.0, see NOTICE.md]"
       ],
-      "sha": "82859984d419a1c55eb7d867c8e61f0d0d911ed5"
+      "sha": "975f8d98bca1d24f95ec2eb6dd337590f133a827"
     }
   ],
-  "at": "2026-10-11T07:12:42.895Z"
+  "at": "2026-10-11T09:49:01.782Z"
 }

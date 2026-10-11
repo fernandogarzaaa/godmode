@@ -66,7 +66,7 @@ if (args.includes("--http")) {
           const d = discover();
           result = {
             protocolVersion: typeof params?.protocolVersion === "string" ? params.protocolVersion : FALLBACK_PROTOCOL,
-            capabilities: { tools: { listChanged: false }, experimental: d.capabilities.extensions },
+            capabilities: { tools: { listChanged: false }, resources: {}, experimental: d.capabilities.extensions },
             serverInfo: SERVER_INFO,
             instructions: "GodMode: call godmode_status first; long tools can run via godmode_task_start + godmode_task_get.",
           };

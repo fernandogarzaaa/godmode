@@ -8,7 +8,10 @@ npm install --omit=dev
 # better-sqlite3 is an optionalDependency but required for the hash-chained
 # audit ledger; npm can silently skip optional deps on flaky networks, and
 # `doctor` only warns. Install it explicitly (non-fatal: doctor reports it).
-npm install --no-save better-sqlite3
+& {
+  $PSNativeCommandUseErrorActionPreference = $false
+  npm install --no-save better-sqlite3
+}
 if ($LASTEXITCODE -ne 0) { Write-Warning "better-sqlite3 not installed; genesis ledger disabled (see 'node bin/godmode.js doctor')" }
 node bin/godmode.js doctor
 Write-Output "godmode installed at $dst"

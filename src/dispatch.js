@@ -171,10 +171,13 @@ export const dispatch = {
       try {
         const { default: Database } = await import("better-sqlite3");
         const db = new Database(dbP, { readonly: true });
-        const row = db.prepare("SELECT COUNT(*) AS n, MAX(seq) AS m FROM ledger").get();
-        const last = row.m ? db.prepare("SELECT substr(entry_hash,1,12) AS h, entry_type, recorded_at FROM ledger WHERE seq=?").get(row.m) : null;
-        db.close();
-        ledger = { db: dbP, entries: row.n, latest: last };
+        try {
+          const row = db.prepare("SELECT COUNT(*) AS n, MAX(seq) AS m FROM ledger").get();
+          const last = row.m ? db.prepare("SELECT substr(entry_hash,1,12) AS h, entry_type, recorded_at FROM ledger WHERE seq=?").get(row.m) : null;
+          ledger = { db: dbP, entries: row.n, latest: last };
+        } finally {
+          db.close();
+        }
       } catch {
         ledger = { db: dbP, entries: null, latest: null, note: "better-sqlite3 not installed; run npm install better-sqlite3" };
       }

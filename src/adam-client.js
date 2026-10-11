@@ -3,7 +3,7 @@
 // Fallback: returns {_adam: "unavailable", ...} instead of crashing — never a silent stub.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, readSync, closeSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,7 +53,7 @@ export function adamBinaryStatus() {
 export function adamBinary() { return adamBinaryStatus().bin; }
 
 function dataDir() {
-  const d = process.env.GODMODE_DATA_DIR || join(process.cwd(), ".godmode");
+  const d = resolve(process.env.GODMODE_DATA_DIR || join(process.cwd(), ".godmode"));
   mkdirSync(d, { recursive: true });
   return d;
 }
@@ -77,9 +77,10 @@ function pump(s) {
 }
 
 function getSession(bin) {
-  let s = sessions.get(bin);
-  if (s && !s.dead) return s;
   const d = dataDir();
+  const key = `${bin}${d}`;
+  let s = sessions.get(key);
+  if (s && !s.dead) return s;
   const child = spawn(bin, [], {
     stdio: ["pipe", "pipe", "inherit"],
     env: {
@@ -89,18 +90,19 @@ function getSession(bin) {
       ADAM_DATA_DIR: d,
     },
   });
-  s = { child, bin, dead: false, nextId: 1, buf: "", waiters: new Map(), lock: Promise.resolve(), initPromise: null };
+  s = { child, bin, key, dead: false, nextId: 1, buf: "", waiters: new Map(), lock: Promise.resolve(), initPromise: null };
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (c) => { s.buf += c; pump(s); });
   const die = () => {
     s.dead = true;
-    if (sessions.get(bin) === s) sessions.delete(bin);
+    if (sessions.get(key) === s) sessions.delete(key);
     for (const w of s.waiters.values()) { try { w({ _writeError: true }); } catch { /* ignore */ } }
     s.waiters.clear();
   };
   child.on("exit", die);
   child.on("error", die);
-  sessions.set(bin, s);
+  child.stdin.on("error", die);
+  sessions.set(key, s);
   return s;
 }
 
@@ -127,7 +129,7 @@ async function ensureInit(s) {
       }, 30000);
       if (!msg || msg._timeout || msg._writeError || msg.error) {
         s.dead = true;
-        if (sessions.get(s.bin) === s) sessions.delete(s.bin);
+        if (sessions.get(s.key) === s) sessions.delete(s.key);
         throw new Error("adam initialize failed");
       }
     })();
@@ -153,7 +155,7 @@ function call(bin, tool, args, timeoutMs = 60000) {
       ? msg.result.content.map((c) => c?.text ?? "").join("\n")
       : "";
     return (msg.error || isErr)
-      ? { _adam: "rpc-error", tool, error: msg.error ? String(msg.error).slice(0, 300) : text.slice(0, 300) || "adam tool reported isError" }
+      ? { _adam: "rpc-error", tool, error: msg.error ? String(msg.error.message ?? JSON.stringify(msg.error)).slice(0, 300) : text.slice(0, 300) || "adam tool reported isError" }
       : { _adam: "ok", tool, result: msg.result?.content ?? msg.result?.result ?? msg };
   });
   s.lock = run.catch(() => {}); // keep the chain alive for the next caller

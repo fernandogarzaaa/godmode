@@ -5,27 +5,59 @@ Standalone universal plugin + MCP product engine: **Genesis** (evaluation & assu
 ## Install
 
 ```bash
-npm i -g @fernandogarzaaa/godmode  # or clone fernandogarzaaa/godmode
-godmode doctor              # all vendored engines present?
-godmode                     # opens browser console (CLI + Live Trace) on 127.0.0.1 auto-port
+git clone https://github.com/fernandogarzaaa/godmode.git
+cd godmode
+npm install
+npm install --no-save better-sqlite3   # optional, but required for the hash-chained audit ledger
+node bin/godmode.js doctor             # all vendored engines present?
+node bin/godmode.js serve --no-open    # browser console (CLI + Live Trace) on 127.0.0.1 auto-port
 ```
 
-From a clone: `npm install && node bin/godmode.js doctor`. `doctor` also reports optional engines:
+One-liner: `curl -fsSL https://raw.githubusercontent.com/fernandogarzaaa/godmode/main/install.sh | bash`
+(Windows: `install.ps1`). The npm package `@fernandogarzaaa/godmode` is not published yet, so
+`npm i -g @fernandogarzaaa/godmode` does not work; install from the clone and put `bin/` on your
+PATH if you want bare `godmode` / `godmode-mcp` commands.
+
+`doctor` also reports optional engines:
 the committed `adam-mcp` prebuilts are linux-x64 and win-x64 only, so on other CPUs (e.g. linux-arm64,
 Apple Silicon) the memory/beliefs/genome tools return `adam_unavailable` until you build ADAM:
 `cd vendors/adam && CARGO_TARGET_DIR=/tmp/adam-target cargo build --release -p adam-mcp` and set
 `GODMODE_ADAM_BIN=/tmp/adam-target/release/adam-mcp`.
 
-MCP clients (Claude/Codex/OpenCode/Cursor/VSCode): point at `bin/godmode-mcp.js` (stdio) or `godmode-mcp --http 8787`. Manifests: `.claude-plugin/`, `.codex/skills/godmode/`, `.opencode/plugin.json`, `mcpServers.json`.
+MCP clients (Claude/Codex/OpenCode/Cursor/VSCode): point at `bin/godmode-mcp.js` (stdio) or
+`node bin/godmode-mcp.js --http 8787`. Manifests: `.claude-plugin/`, `.codex/skills/godmode/`,
+`.opencode/plugin.json`, `mcpServers.json`.
 
 ## Use
 
+From the clone, prefix with `node bin/godmode.js` (bare `godmode` works once `bin/` is on your PATH):
+
 ```bash
-godmode run godmode_status '{}'
-godmode run godmode_validate_experience '{"url":"mock:","persona":"curious-explorer","seed":7}'
-godmode run godmode_audit_claim '{"suite":"code"}'
-godmode run godmode_orchestrate '{"op":"status"}'
+node bin/godmode.js run godmode_status '{}'
+node bin/godmode.js run godmode_validate_experience '{"url":"mock:","persona":"curious-explorer","seed":7}'
+node bin/godmode.js run godmode_audit_claim suite=code verifier="node ./verifier.mjs {task_file} {completion_file}"
+node bin/godmode.js run godmode_orchestrate '{"op":"status"}'
+node bin/godmode.js run godmode_compare run_a=./runs/a run_b=./runs/b
+node bin/godmode.js run godmode_report '{}'
 ```
+
+`godmode_audit_claim` needs a verifier command (with `{task_file}` and `{completion_file}`
+placeholders) to actually audit; without one it returns `UNTESTED` and lists the suites.
+The verifier must print JSON with a numeric `reward` field; genesis adversarially probes it and
+returns `SOUND` / `EXPLOITABLE` with false-accept / false-reject rates.
+
+`godmode_compare` diffs two genesis run bundles (directories with `verdict.json` plus
+`treatment/metrics.json`).
+
+`godmode_orchestrate` auto-detects python (`GODMODE_PYTHON`, else `python3`, else `python`).
+
+`godmode_evolve` drives the real `adam-mcp`: `action=propose` needs `kind`
+(`retire_skill` | `reconcile_belief` | `investigate_conflict` | `amend_genome`);
+`action=accept` is destructive and requires `confirm=true` (MRTR elicitation);
+`action=reject` drops a proposal; `action=status` derives evolution signals.
+
+`godmode_world_simulate` needs the eve-miro Python environment (3.11 + providers); without it
+the tool fails closed with `engine_not_configured` instead of a fake result.
 
 Browser console: Live Trace · Tasks · Task Graph · Experience · Ledger · Mods · CLI pane (same dispatch as `tools/call`).
 
@@ -37,8 +69,19 @@ persisted in `.godmode/tasks.json`.
 
 ## Evidence
 
-Every `godmode_audit_claim` writes to the hash-chained ledger at `.godmode/genesis-ledger.db`
-(`Ledger: entry <hash>` in the result). No `--ledger` flag needed.
+`godmode_audit_claim` with a verifier writes to the hash-chained ledger at `.godmode/genesis-ledger.db`
+(`Ledger: entry <hash>` in the result). No `--ledger` flag needed. The ledger needs the optional
+`better-sqlite3` dependency (`npm install --no-save better-sqlite3`); without it the audit fails
+with an explicit error instead of silently skipping the ledger. Every tool call is also appended
+to `.godmode/ledger.jsonl`. `godmode_report`, `godmode-mcp` resources (`ledger://genesis`,
+`report://eve/latest`, `genome://current`, `graph://skein/current`), and the console Ledger tab
+all read these real artifacts.
+
+## ADAM first run
+
+The first memory/beliefs call downloads the `all-MiniLM-L6-v2` ONNX embedding model (~23 MB) from
+Hugging Face into `./.fastembed_cache` (override with `ADAM_EMBEDDING_CACHE_DIR`). Without network
+access those tools fail closed with an explicit error; `godmode_genome` works offline.
 
 ## Auth
 

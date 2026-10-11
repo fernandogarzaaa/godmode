@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { adamBinaryStatus } from "./adam-client.js";
+import { adamCall } from "./adam-client.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const V = (p) => join(root, "vendors", p);
@@ -40,6 +41,18 @@ export function runNode(entry, args, opts = {}) {
 }
 export function failEve() {
   return fail("eve", "bin/eve.js + dist missing; build vendors/eve");
+}
+// GODMODE_PYTHON wins; otherwise prefer python3 (Debian/Ubuntu ship no
+// `python` binary, so the old `process.env.GODMODE_PYTHON || "python"`
+// default broke `godmode_orchestrate` on a fresh Linux box).
+let _py = null;
+export function resolvePython() {
+  if (process.env.GODMODE_PYTHON) return process.env.GODMODE_PYTHON;
+  if (_py) return _py;
+  for (const c of ["python3", "python"]) {
+    try { execFileSync(c, ["--version"], { stdio: "ignore" }); _py = c; break; } catch { /* try next */ }
+  }
+  return _py ?? "python3";
 }
 export function adamBin() {
   return adamBinaryStatus().bin;
@@ -104,7 +117,7 @@ export const dispatch = {
   orchestrate({ op = "status", node = "", agent_id = "godmode" } = {}) {
     const s = skeinSrc();
     if (!s) return fail("skein", "vendors/skein/src missing");
-    const py = process.env.GODMODE_PYTHON || "python";
+    const py = resolvePython();
     const map = { status: ["status"], graph: ["graph"], claim: ["claim", node, "--agent-id", agent_id], release: ["release", node], log: ["log", "--node", node] };
     const args = map[op] ?? ["status"];
     const r = run(py, ["-m", "skein.cli", ...args].filter(Boolean), {
@@ -116,6 +129,95 @@ export const dispatch = {
   world({ scenario = "experiments/typhoon/typhoon_manila_closed_loop.yaml" } = {}) {
     const s = miroSrc();
     if (!s) return fail("eve-miro", "vendors/eve-miro/src missing");
-    return { scenario, provenance: ["OBSERVED", "DERIVED", "FORECAST", "SIMULATED"], note: "Run FIXTURES=1 offline; live needs OPENMETEO_LIVE=1 + engines up (fail-closed 503 otherwise)" };
+    // Fail closed with the real cause instead of a "complete" note: the
+    // vendored tree is missing its marketsim subpackage (src/marketsim
+    // absent), so `import eve_miro` fails before any scenario can run.
+    // A closed loop additionally needs the eve-miro Python environment
+    // (3.11 + providers); see vendors/eve-miro/README.md.
+    if (!existsSync(join(s, "marketsim"))) {
+      return fail("eve-miro", "cannot import eve_miro: src/marketsim is missing from vendors/eve-miro; re-run scripts/sync-vendors.mjs or install eve-miro's Python env");
+    }
+    return fail("eve-miro", `scenario '${scenario}' needs the eve-miro Python environment (3.11 + providers); the vendored copy cannot run it standalone`);
+  },
+  compare({ run_a = "", run_b = "" } = {}) {
+    const e = genesisEntry();
+    if (!e) return fail("genesis", "dist not built; run npm run build in vendors/genesis");
+    if (!run_a || !run_b) {
+      return { error: "missing_run", detail: "pass run_a and run_b: genesis run-bundle dirs (each with verdict.json + treatment/metrics.json)" };
+    }
+    for (const [label, d] of [["run_a", run_a], ["run_b", run_b]]) {
+      if (!existsSync(join(d, "verdict.json"))) {
+        return { error: "missing_run", detail: `${label}: '${d}' has no verdict.json; not a genesis run bundle` };
+      }
+    }
+    const r = run("node", [e, "compare", run_a, run_b]);
+    return { run_a, run_b, ...r };
+  },
+  async report({ ref = "latest" } = {}) {
+    const dir = process.env.GODMODE_DATA_DIR || join(process.cwd(), ".godmode");
+    const eveOut = join(process.cwd(), ".eve-output");
+    const htmlP = join(eveOut, "report.html");
+    const mdP = join(eveOut, "report.md");
+    const out = { ref };
+    out.eve = {
+      html_uri: existsSync(htmlP) ? htmlP : null,
+      markdown: existsSync(mdP) ? readFileSync(mdP, "utf8").slice(0, 4000) : null,
+    };
+    if (!out.eve.html_uri && !out.eve.markdown) out.eve.note = "no EVE report yet; run godmode_validate_experience first";
+    // Genesis ledger: entry count + latest hash (better-sqlite3 is optional).
+    const dbP = join(dir, "genesis-ledger.db");
+    let ledger = { db: dbP, entries: null, latest: null };
+    if (existsSync(dbP)) {
+      try {
+        const { default: Database } = await import("better-sqlite3");
+        const db = new Database(dbP, { readonly: true });
+        const row = db.prepare("SELECT COUNT(*) AS n, MAX(seq) AS m FROM ledger").get();
+        const last = row.m ? db.prepare("SELECT substr(entry_hash,1,12) AS h, entry_type, recorded_at FROM ledger WHERE seq=?").get(row.m) : null;
+        db.close();
+        ledger = { db: dbP, entries: row.n, latest: last };
+      } catch {
+        ledger = { db: dbP, entries: null, latest: null, note: "better-sqlite3 not installed; run npm install better-sqlite3" };
+      }
+    } else {
+      ledger = { db: dbP, entries: 0, latest: null, note: "no audits yet; run godmode_audit_claim with a verifier" };
+    }
+    out.genesis = ledger;
+    // JSONL trace ledger (always available).
+    const jlP = join(dir, "ledger.jsonl");
+    out.trace_ledger = { path: jlP, entries: existsSync(jlP) ? readFileSync(jlP, "utf8").trim().split("\n").filter(Boolean).length : 0 };
+    out.world = { note: "eve-miro engine not configured; godmode_world_simulate reports the cause" };
+    return out;
+  },
+  async evolve({ action = "propose", proposal_id = "", kind = "", field = "", suggested_value = "", current_value = "", rationale = "", evidence = [], organism_id = "default" } = {}) {
+    const valid = ["propose", "accept", "reject", "status"];
+    if (!valid.includes(action)) {
+      return { error: "unknown_action", detail: `action must be one of ${valid.join("|")}` };
+    }
+    const b = adamBin();
+    if (!b) return fail("adam", "adam-mcp binary absent; build vendors/adam (cargo build --release -p adam-mcp)");
+    const wrap = (r) => (r._adam === "ok" ? { action, ...r } : { action, ...r, error: r.error ?? "adam_error" });
+    switch (action) {
+      case "propose": {
+        if (!kind) return { error: "missing_kind", detail: "kind is required: retire_skill | reconcile_belief | investigate_conflict | amend_genome" };
+        const args = { action: "create", kind };
+        if (field) args.field = field;
+        if (current_value !== "") args.current_value = current_value;
+        else if (field) args.current_value = "(unset)";
+        if (suggested_value) args.suggested_value = suggested_value;
+        if (rationale) args.rationale = rationale;
+        if (evidence?.length) args.evidence = evidence;
+        return wrap(await adamCall("adam_propose_mutation", args, organism_id));
+      }
+      case "accept": {
+        if (!proposal_id) return { error: "missing_proposal_id", detail: "proposal_id is required to accept a mutation" };
+        return wrap(await adamCall("adam_accept_mutation", { proposal_id }, organism_id));
+      }
+      case "reject": {
+        if (!proposal_id) return { error: "missing_proposal_id", detail: "proposal_id is required to reject a mutation" };
+        return wrap(await adamCall("adam_reject_mutation", { proposal_id }, organism_id));
+      }
+      case "status":
+        return wrap(await adamCall("adam_evolve", { auto: true }, organism_id));
+    }
   },
 };

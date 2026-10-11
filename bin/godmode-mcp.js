@@ -2,7 +2,7 @@
 // godmode-mcp: stdio JSON-RPC 2.0 (MCP 2026-07-28 compatible surface) + --http Streamable-ish endpoint.
 // Stateless protocol: state travels in handles (organism_id, node, task_id).
 import { createServer } from "node:http";
-import { dispatchCall, toolsList, discover } from "../src/server.js";
+import { dispatchCall, toolsList, discover, resourcesList, resourcesRead } from "../src/server.js";
 import { taskGet } from "../src/tasks.js";
 import { protectedResourceDoc, checkBearer, unauthorized } from "../src/auth.js";
 
@@ -75,7 +75,8 @@ if (args.includes("--http")) {
         case "ping": result = {}; break;
         case "server/discover": result = discover(); break;
         case "tools/list": result = toolsList(); break;
-        case "resources/list": result = { resources: [] }; break;
+        case "resources/list": result = resourcesList(); break;
+        case "resources/read": result = await resourcesRead(params?.uri); break;
         case "prompts/list": result = { prompts: [] }; break;
         case "tasks/get": result = { resultType: "complete", task: taskGet(params?.task_id) }; break;
         case "tools/call": {

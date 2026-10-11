@@ -58,49 +58,114 @@ function dataDir() {
   return d;
 }
 
-function call(bin, tool, args, timeoutMs = 60000) {
-  return new Promise((resolve) => {
-    const child = spawn(bin, [], {
-      stdio: ["pipe", "pipe", "inherit"],
-      env: {
-        ...process.env,
-        ADAM_MEMORY_PATH: join(dataDir(), "adam_memory.db"),
-        ADAM_GENOME_PATH: join(dataDir(), "adam_genome.json"),
-        ADAM_DATA_DIR: dataDir(),
-      },
-    });
-    let buf = "";
-    let done = false;
-    const timer = setTimeout(() => { if (!done) { done = true; child.kill(); resolve({ _adam: "timeout", tool }); } }, timeoutMs);
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (c) => {
-      buf += c;
-      let idx;
-      while (!done && (idx = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, idx).trim(); buf = buf.slice(idx + 1);
-        if (!line) continue;
-        try {
-          const msg = JSON.parse(line);
-          if (msg.id === 1 && msg.result?.capabilities) { send("tools/call", { name: tool, arguments: args }, 2); continue; }
-          if (msg.id === 2) {
-            done = true;
-            clearTimeout(timer);
-            child.kill();
-            resolve(msg.error
-              ? { _adam: "rpc-error", tool, error: msg.error }
-              : { _adam: "ok", tool, result: msg.result?.content ?? msg.result?.result ?? msg });
-            continue;
-          }
-        } catch { /* skip non-JSON */ }
-      }
-    });
-    child.on("error", () => { if (!done) { done = true; clearTimeout(timer); resolve({ _adam: "spawn-error", tool }); } });
-    child.on("exit", () => { if (!done) { done = true; clearTimeout(timer); resolve({ _adam: "exited", tool }); } });
-    function send(method, params, id = 1) {
-      try { child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"); } catch { /* ignore */ }
-    }
-    send("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "godmode", version: "1.0.0" } });
+// Persistent adam-mcp sessions: one child per binary, shared across calls in
+// this process. Spawning per call made propose -> accept impossible (ADAM
+// keeps proposals in process memory, so accept always answered "not found").
+const sessions = new Map();
+
+function pump(s) {
+  let idx;
+  while ((idx = s.buf.indexOf("\n")) >= 0) {
+    const line = s.buf.slice(0, idx).trim();
+    s.buf = s.buf.slice(idx + 1);
+    if (!line) continue;
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    const w = s.waiters.get(msg.id);
+    if (w) { s.waiters.delete(msg.id); w(msg); }
+  }
+}
+
+function getSession(bin) {
+  let s = sessions.get(bin);
+  if (s && !s.dead) return s;
+  const d = dataDir();
+  const child = spawn(bin, [], {
+    stdio: ["pipe", "pipe", "inherit"],
+    env: {
+      ...process.env,
+      ADAM_MEMORY_PATH: join(d, "adam_memory.db"),
+      ADAM_GENOME_PATH: join(d, "adam_genome.json"),
+      ADAM_DATA_DIR: d,
+    },
   });
+  s = { child, bin, dead: false, nextId: 1, buf: "", waiters: new Map(), lock: Promise.resolve(), initPromise: null };
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", (c) => { s.buf += c; pump(s); });
+  const die = () => {
+    s.dead = true;
+    if (sessions.get(bin) === s) sessions.delete(bin);
+    for (const w of s.waiters.values()) { try { w({ _writeError: true }); } catch { /* ignore */ } }
+    s.waiters.clear();
+  };
+  child.on("exit", die);
+  child.on("error", die);
+  sessions.set(bin, s);
+  return s;
+}
+
+function rpc(s, method, params, timeoutMs) {
+  return new Promise((resolve) => {
+    const id = s.nextId++;
+    const timer = setTimeout(() => { s.waiters.delete(id); resolve({ _timeout: true }); }, timeoutMs);
+    s.waiters.set(id, (msg) => { clearTimeout(timer); resolve(msg); });
+    try {
+      s.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    } catch {
+      clearTimeout(timer);
+      s.waiters.delete(id);
+      resolve({ _writeError: true });
+    }
+  });
+}
+
+async function ensureInit(s) {
+  if (!s.initPromise) {
+    s.initPromise = (async () => {
+      const msg = await rpc(s, "initialize", {
+        protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "godmode", version: "1.0.0" },
+      }, 30000);
+      if (!msg || msg._timeout || msg._writeError || msg.error) {
+        s.dead = true;
+        if (sessions.get(s.bin) === s) sessions.delete(s.bin);
+        throw new Error("adam initialize failed");
+      }
+    })();
+  }
+  await s.initPromise;
+}
+
+function call(bin, tool, args, timeoutMs = 60000) {
+  const s = getSession(bin);
+  // Serialize calls per session: adam-mcp is single-threaded stdio, and
+  // proposals live in process memory, so one shared child is what makes
+  // propose -> accept work across tool calls in this process.
+  const run = s.lock.then(async () => {
+    try { await ensureInit(s); }
+    catch { return { _adam: "spawn-error", tool }; }
+    const msg = await rpc(s, "tools/call", { name: tool, arguments: args }, timeoutMs);
+    if (msg._timeout) return { _adam: "timeout", tool };
+    if (msg._writeError || s.dead) return { _adam: "spawn-error", tool };
+    // MCP reports tool failures as result.isError, not as a JSON-RPC error:
+    // surfacing them as {_adam:"ok"} would be a fake success.
+    const isErr = msg.result?.isError === true;
+    const text = Array.isArray(msg.result?.content)
+      ? msg.result.content.map((c) => c?.text ?? "").join("\n")
+      : "";
+    return (msg.error || isErr)
+      ? { _adam: "rpc-error", tool, error: msg.error ? String(msg.error).slice(0, 300) : text.slice(0, 300) || "adam tool reported isError" }
+      : { _adam: "ok", tool, result: msg.result?.content ?? msg.result?.result ?? msg };
+  });
+  s.lock = run.catch(() => {}); // keep the chain alive for the next caller
+  return run;
+}
+
+export async function adamShutdown() {
+  for (const s of sessions.values()) {
+    s.dead = true;
+    try { s.child.kill(); } catch { /* ignore */ }
+  }
+  sessions.clear();
 }
 
 export async function adamCall(tool, args = {}, organismId = "default") {

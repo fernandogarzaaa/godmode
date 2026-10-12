@@ -24,6 +24,12 @@ Apple Silicon) the memory/beliefs/genome tools return `adam_unavailable` until y
 `cd vendors/adam && CARGO_TARGET_DIR=/tmp/adam-target cargo build --release -p adam-mcp` and set
 `GODMODE_ADAM_BIN=/tmp/adam-target/release/adam-mcp`.
 
+**Prebuilt ADAM binaries.** `vendors/adam/target/release/adam-mcp` (linux-x64) and `adam-mcp.exe`
+(win-x64), about 70 MB together, are committed to git today. They are not yet published as GitHub
+release assets, so `node scripts/fetch-adam.mjs` (which downloads from a godmode release) has nothing
+to fetch until a release with those assets exists. Moving them out of git (release assets with
+sha256 verification, or Git LFS) is planned; until then they are marked binary in `.gitattributes`.
+
 MCP clients (Claude/Codex/OpenCode/Cursor/VSCode): point at `bin/godmode-mcp.js` (stdio) or
 `node bin/godmode-mcp.js --http 8787`. Manifests: `.claude-plugin/`, `.codex/skills/godmode/`,
 `.opencode/plugin.json`, `mcpServers.json`.

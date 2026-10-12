@@ -24,8 +24,7 @@ export function destFor(asset) {
 
 const invokedDirectly = String(process.argv[1] || "").replace(/\\/g, "/").endsWith("scripts/fetch-adam.mjs");
 if (invokedDirectly && process.argv.includes("--check")) {
-if (invokedDirectly) {
-const asset = assetFor();
+  const asset = assetFor();
   const dest = asset ? destFor(asset) : null;
   console.log(JSON.stringify({
     platform: process.platform, arch: process.arch, tag: TAG,
@@ -35,6 +34,7 @@ const asset = assetFor();
   process.exit(asset ? 0 : 1);
 }
 
+if (invokedDirectly) {
 const asset = assetFor();
 if (!asset) { console.error("unsupported platform for prebuilt adam-mcp; build from vendors/adam"); process.exit(1); }
 const dest = destFor(asset);

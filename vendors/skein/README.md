@@ -38,10 +38,22 @@ v0.1 ships exactly one backend adapter: **Claude Code**, invoked headlessly
 ## Install
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-This installs the `skein` entrypoint (requires Python ≥ 3.9 and git).
+Use a virtual environment: on Debian/Ubuntu, installing into the system
+Python is blocked (`externally-managed-environment`). The package has zero
+runtime dependencies, so the install itself is tiny. If `python3 -m venv`
+fails with `ensurepip` errors, install the venv module first:
+`sudo apt install python3-venv` (Debian/Ubuntu).
+
+Windows: use `py -m venv .venv` (or `python -m venv .venv`) and activate
+with `.venv\Scripts\activate`; the `python3` command used in examples below
+becomes `py` (or `python`) on Windows.
+
+This installs the `skein` entrypoint (requires Python ≥ 3.10 and git).
 
 ## Usage walkthrough
 
@@ -55,14 +67,14 @@ skein node add auth-3 --title "Add session login" \
   --goal "Users can log in with email+password and get a session." \
   --context "Python project, follow existing patterns in src/." \
   --constraints "No new dependencies." \
-  --completion "python -c \"print('login check ok')\"" \
+  --completion "python3 -c \"print('login check ok')\"" \
   --blast-radius "src/auth/**"
 
 skein node add profile-1 --title "Profile page" \
   --goal "Logged-in users see their profile." \
   --context "Python project." \
   --constraints "No new dependencies." \
-  --completion "python -c \"print('profile check ok')\"" \
+  --completion "python3 -c \"print('profile check ok')\"" \
   --depends-on auth-3 --blast-radius "src/profile/**"
 
 skein graph
@@ -70,7 +82,12 @@ skein status
 
 # claim a node (fails cleanly if dependencies aren't done or a
 # blast-radius overlap exists with another claimed node)
+# NOTE: many systems only ship `python3` (no `python`), hence python3 above.
 skein claim auth-3 --agent-id agent-1
+# Actor identity: commands that act on a claim (release, run, ship) check
+# SKEIN_ACTOR against the claim holder. When you claim with --agent-id,
+# export the same id so later commands recognize you:
+export SKEIN_ACTOR=agent-1
 skein release auth-3   # release a claim (only claimed/in-progress nodes)
 
 # full supervised path: claim (if needed) + worktree + backend adapter +
@@ -280,6 +297,40 @@ warning, never a crash. Custom profiles are unverified by default —
 marking one verified is the owner's claim about their own binary,
 stated in its source note.
 
+### Backend network egress under the scrubbed environment
+
+Backends run with a scrubbed environment: `PATH`, `HOME`, `LANG`, and
+`SKEIN_*` variables only. Ambient secrets and proxy settings are
+deliberately not inherited, so on hosts where egress requires a proxy
+a backend that makes HTTPS calls will fail without extra setup.
+
+The supported pattern is the `SKEIN_*` passthrough contract: export the
+values the backend needs with a `SKEIN_` prefix, and map them onto the
+standard names inside your backend wrapper:
+
+```bash
+export SKEIN_HTTPS_PROXY="$https_proxy" SKEIN_HTTP_PROXY="$http_proxy" \
+       SKEIN_NO_PROXY="$no_proxy" SKEIN_ALL_PROXY="$all_proxy"
+export SKEIN_ACTOR=agent-1
+skein run my-node --agent-id agent-1
+```
+
+```python
+# inside the backend wrapper, before any network call:
+for std, sk in (("https_proxy", "SKEIN_HTTPS_PROXY"),
+                ("http_proxy", "SKEIN_HTTP_PROXY"),
+                ("no_proxy", "SKEIN_NO_PROXY"),
+                ("all_proxy", "SKEIN_ALL_PROXY")):
+    if os.environ.get(sk):
+        os.environ[std] = os.environ[sk]
+```
+
+This is proven, not hypothetical: the production-readiness dogfood ran
+a real `pr_auditor` backend (a script calling the GitHub API live for
+PR merge state and check runs) across 5 nodes with exactly this
+mapping. Without the mapping the API calls fail; with it, all 5 nodes
+completed and their evidence verified independently against the API.
+
 ## Backend note (proven against the real CLI)
 
 - Proven with the real `claude` CLI binary (2.1.248) driving a real
@@ -325,6 +376,8 @@ decide — and `blast_radius` overlap itself is checked heuristically.
 ## Development
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[test]"
 python -m pytest
 ```

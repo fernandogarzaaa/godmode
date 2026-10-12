@@ -28,3 +28,8 @@ vendors/adam/target/release/*
 # Never commit real env files (only .env.example templates).
 .env
 *.env
+
+# eve-miro runtime state: produced by market-sim/accumulate runs, not source.
+vendors/eve-miro/storage/market/latest_market_run.json
+vendors/eve-miro/storage/market/trust_ledger.jsonl
+vendors/eve-miro/storage/market/trust_summary.json

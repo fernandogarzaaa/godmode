@@ -1,0 +1,7 @@
+# Prebuilt adam-mcp binaries (~70 MB total) are committed so godmode works
+# without a Rust toolchain. Mark them binary so git never tries to diff/merge
+# them. Planned: move them to GitHub release assets fetched by
+# scripts/fetch-adam.mjs (with sha256 verification) or to Git LFS; see
+# README "Prebuilt ADAM binaries".
+vendors/adam/target/release/adam-mcp binary -diff linguist-generated
+vendors/adam/target/release/adam-mcp.exe binary -diff linguist-generated

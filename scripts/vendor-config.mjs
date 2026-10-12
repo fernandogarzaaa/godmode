@@ -14,7 +14,11 @@ export const VENDOR_JOBS = [
 ];
 
 // Substrings that must never be copied (build outputs, VCS, venvs, caches).
-export const EXCLUDE_PARTS = ["node_modules",".git/","/dist/","target/",".venv/","__pycache__",".pytest_cache/",".eve-output",".godmode/",".egg-info"];
+export const EXCLUDE_PARTS = ["node_modules",".git/","/dist/","target/",".venv/","__pycache__",".pytest_cache/",".eve-output",".godmode/",".egg-info",
+  // eve-miro runtime state (rewritten by every market-sim/accumulate run upstream);
+  // vendoring it made every auto-update PR carry data churn. The API returns 404
+  // when latest_market_run.json is absent, so nothing depends on these files.
+  "storage/market/latest_market_run.json","storage/market/trust_ledger.jsonl","storage/market/trust_summary.json"];
 
 // AGPL boundary: only vendors/eve-miro/mirofish may contain AGPL-3.0.
 export const AGPL_ALLOWED_PREFIX = "vendors/eve-miro/mirofish/";

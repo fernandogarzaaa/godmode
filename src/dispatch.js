@@ -196,12 +196,20 @@ export const dispatch = {
     if (!valid.includes(action)) {
       return { error: "unknown_action", detail: `action must be one of ${valid.join("|")}` };
     }
+    // Validate per-action arguments before touching the adam binary, so a bad
+    // call reports the real problem on every host (including ones without a
+    // working adam-mcp build) instead of engine_not_configured.
+    if (action === "propose" && !kind) {
+      return { error: "missing_kind", detail: "kind is required: retire_skill | reconcile_belief | investigate_conflict | amend_genome" };
+    }
+    if ((action === "accept" || action === "reject") && !proposal_id) {
+      return { error: "missing_proposal_id", detail: `proposal_id is required to ${action} a mutation` };
+    }
     const b = adamBin();
     if (!b) return fail("adam", "adam-mcp binary absent; build vendors/adam (cargo build --release -p adam-mcp)");
     const wrap = (r) => (r._adam === "ok" ? { action, ...r } : { action, ...r, error: r.error ?? "adam_error" });
     switch (action) {
       case "propose": {
-        if (!kind) return { error: "missing_kind", detail: "kind is required: retire_skill | reconcile_belief | investigate_conflict | amend_genome" };
         const args = { action: "create", kind };
         if (field) args.field = field;
         if (current_value !== "") args.current_value = current_value;
@@ -212,11 +220,9 @@ export const dispatch = {
         return wrap(await adamCall("adam_propose_mutation", args, organism_id));
       }
       case "accept": {
-        if (!proposal_id) return { error: "missing_proposal_id", detail: "proposal_id is required to accept a mutation" };
         return wrap(await adamCall("adam_accept_mutation", { proposal_id }, organism_id));
       }
       case "reject": {
-        if (!proposal_id) return { error: "missing_proposal_id", detail: "proposal_id is required to reject a mutation" };
         return wrap(await adamCall("adam_reject_mutation", { proposal_id }, organism_id));
       }
       case "status":

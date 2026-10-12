@@ -25,7 +25,7 @@
         "LICENSE",
         ".claude-plugin"
       ],
-      "sha": "d86b7676625ea441598552da820009cedb6b7d5d"
+      "sha": "3a7ca28b1c2d76d2fbd2276a7533752f1d677ef3"
     },
     {
       "dest": "vendors/eve",
@@ -55,7 +55,7 @@
         ".codex",
         ".claude-plugin"
       ],
-      "sha": "26516424c42045fbe0bf8dd362b2cc6f4db2328b"
+      "sha": "f057f72e1df61e30bd17b7b7151b9850f39c7370"
     },
     {
       "dest": "vendors/adam",
@@ -77,7 +77,7 @@
         ".claude-plugin",
         ".mcp.json"
       ],
-      "sha": "1659ee9860593f37d3fc18118df2118dd6dcd7b5"
+      "sha": "e977414ac34e108438cd471fd4db54db96dd45c0"
     },
     {
       "dest": "vendors/skein",
@@ -91,7 +91,7 @@
         "CHANGELOG.md",
         ".github"
       ],
-      "sha": "b2744f235b7302564f7b9d52090684c33be197f8"
+      "sha": "b02b4d1722a6de67bbd28a12d8e39c8a80800393"
     },
     {
       "dest": "vendors/eve-miro",
@@ -124,8 +124,8 @@
         ".github",
         "mirofish[AGPL-3.0, see NOTICE.md]"
       ],
-      "sha": "82859984d419a1c55eb7d867c8e61f0d0d911ed5"
+      "sha": "5755aa00a95d66d5c24272713f2215da6f7f276b"
     }
   ],
-  "at": "2026-10-11T07:12:42.895Z"
+  "at": "2026-10-12T14:20:51.985Z"
 }

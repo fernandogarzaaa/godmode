@@ -204,9 +204,21 @@ test("evolve validation does not depend on the adam binary being present", async
     assert.equal(nokind.structuredContent.result.error, "missing_kind");
     const noid = await dispatchCall("godmode_evolve", { action: "accept", confirm: true });
     assert.equal(noid.structuredContent.result.error, "missing_proposal_id");
-    // With valid arguments and no binary, the engine error is still reported.
-    const ok = await dispatchCall("godmode_evolve", { action: "propose", kind: "retire_skill", confirm: true });
-    assert.notEqual(ok.structuredContent.result.error, "missing_kind");
+    assert.match(noid.structuredContent.result.detail, /proposal_id is required to accept/);
+    assert.match(nokind.structuredContent.result.detail, /kind is required/);
+    // With valid arguments and no binary, the engine error is reported for
+    // every action (and no argument error is invented for status/propose).
+    for (const args of [
+      { action: "propose", kind: "retire_skill" },
+      { action: "accept", proposal_id: "p1" },
+      { action: "reject", proposal_id: "p1" },
+      { action: "status" },
+    ]) {
+      const r = (await dispatchCall("godmode_evolve", { ...args, confirm: true })).structuredContent.result;
+      assert.equal(r.error, "engine_not_configured", JSON.stringify(args));
+      assert.equal(r.engine, "adam");
+      assert.match(r.detail, /adam-mcp binary absent/);
+    }
   } finally {
     if (saved === undefined) delete process.env.GODMODE_ADAM_BIN;
     else process.env.GODMODE_ADAM_BIN = saved;

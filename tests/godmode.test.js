@@ -260,3 +260,26 @@ test("evolve propose -> accept works in one process (persistent adam session)", 
     await adamShutdown(); // fresh session so the temp data dir is not reused
   }
 });
+
+test("CLI run: exit codes for unknown tool, bad args, unknown command", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { fileURLToPath } = await import("node:url");
+  const bin = fileURLToPath(new URL("../bin/godmode.js", import.meta.url));
+  const run = (...a) => spawnSync(process.execPath, [bin, ...a], { encoding: "utf8", timeout: 60000 });
+  assert.equal(run("run", "godmode_status").status, 0);
+  assert.equal(run("run", "godmode_status", "{}").status, 0);
+  const unknown = run("run", "nope_x", "{}");
+  assert.equal(unknown.status, 1, "unknown tool must fail");
+  assert.match(unknown.stdout, /unknown_tool/);
+  const badJson = run("run", "godmode_status", "{bad");
+  assert.equal(badJson.status, 2);
+  assert.match(badJson.stderr, /invalid JSON args/);
+  assert.equal(run("run", "godmode_status", "[1]").status, 2, "array args rejected");
+  assert.equal(run("run", "godmode_status", "notjson").status, 2, "stray token rejected");
+  const kv = run("run", "godmode_status", "a=1");
+  assert.equal(kv.status, 0);
+  const bogus = run("bogus");
+  assert.equal(bogus.status, 2);
+  assert.match(bogus.stderr, /unknown command 'bogus'/);
+  assert.equal(run("--help").status, 0);
+});

@@ -9,6 +9,13 @@ import { dispatchCall } from "../src/server.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [cmd, ...rest] = process.argv.slice(2);
+const USAGE = "usage: godmode [serve --no-open | run <tool> [jsonArgs] [--yes] | doctor | mods | trace]";
+
+function usageError(msg) {
+  if (msg) console.error("godmode: " + msg);
+  console.error(USAGE);
+  process.exit(2);
+}
 
 function openBrowser(url) {
   const p = process.platform;
@@ -39,9 +46,12 @@ if (!cmd) {
   // Accept JSON ('{...}') or robust key=value pairs (PowerShell-safe: no inner double quotes needed).
   // Accept JSON ('{...}', bash/cmd) or key=value tokens (PowerShell-safe).
   // Each argv token is parsed individually so quoted multi-word values survive intact.
-  const toks = rest.slice(1);
+  const toks = rest.slice(1).filter((t) => t !== "--yes");
+  if (tool.startsWith("-")) usageError(`expected a tool name after 'run', got '${tool}'`);
   if (toks.length === 1 && toks[0].trim().startsWith("{")) {
-    try { args = JSON.parse(toks[0]); } catch { args = {}; }
+    // Bad JSON used to be replaced by {} silently, running the tool with no args.
+    try { args = JSON.parse(toks[0]); } catch (e) { usageError(`invalid JSON args: ${e.message}`); }
+    if (args === null || typeof args !== "object" || Array.isArray(args)) usageError("JSON args must be an object");
   } else if (toks.length) {
     let cur = null;
     for (const t of toks) {
@@ -52,6 +62,8 @@ if (!cmd) {
         args[cur] = t.slice(eq + 1);
       } else if (cur) {
         args[cur] += " " + t;
+      } else {
+        usageError(`unexpected argument '${t}' (pass a JSON object or key=value pairs)`);
       }
     }
     for (const k of Object.keys(args)) {
@@ -65,6 +77,9 @@ if (!cmd) {
   console.log(JSON.stringify(out, null, 2));
   const { adamShutdown } = await import("../src/adam-client.js");
   await adamShutdown();
+  // Scripts/CI need a failing exit code for unknown tools, tool errors, and
+  // calls that still need confirmation (input_required) — previously always 0.
+  if (out?.resultType !== "complete" || out?.structuredContent?.ok === false) process.exitCode = 1;
 } else if (cmd === "doctor") {
   const checks = [
     ["node>=20", Number(process.versions.node.split(".")[0]) >= 20],
@@ -93,6 +108,8 @@ if (!cmd) {
   const out = await dispatchCall("godmode_status", {});
   console.log(JSON.stringify(out.structuredContent.result.engines, null, 2));
   console.log("trace: .godmode/trace.ndjson (GET /api/trace?since=N in console)");
+} else if (cmd === "help" || cmd === "--help" || cmd === "-h") {
+  console.log(USAGE);
 } else {
-  console.log("usage: godmode [serve --no-open | run <tool> [jsonArgs] [--yes] | doctor | mods | trace]");
+  usageError(`unknown command '${cmd}'`);
 }

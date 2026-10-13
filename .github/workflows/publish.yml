@@ -65,14 +65,21 @@ jobs:
       - run: node --test tests/godmode.test.js
 
       - name: Check npm auth
+        id: auth
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "::error::NPM_TOKEN is not configured. Create an npm automation token (npmjs.com -> Access Tokens -> Generate New Token -> Automation) with publish access to @fernandogarzaaa/godmode, add it as a repo secret named NPM_TOKEN, then push the release tag again."
-            exit 1
+          if [ -z "${NPM_TOKEN}" ]; then
+            # Succeed without publishing so a GitHub release doesn't leave a red run.
+            echo "::notice::NPM_TOKEN is not configured; skipping npm publish. To enable: create an npm automation token with publish access to @fernandogarzaaa/godmode, add it as a repo secret named NPM_TOKEN, then re-run this workflow for the tag."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Skip if version already published
         id: already
+        if: steps.auth.outputs.skip != 'true'
         run: |
           PKG=$(node -p "require('./package.json').name")
           VER=$(node -p "require('./package.json').version")

@@ -1,6 +1,6 @@
 {
   "name": "@fernandogarzaaa/godmode",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "GodMode \u2014 standalone universal plugin + MCP product engine combining Genesis (evaluation & assurance) + EVE (experience validation) + ADAM (cognitive substrate) + Skein (task-graph orchestration) + EVE-MIRO (reality-grounded simulation). No 5-repo clone required.",
   "license": "MIT",
   "type": "module",

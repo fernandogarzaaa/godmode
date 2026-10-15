@@ -22,7 +22,7 @@ import { renderHtmlReport } from "./report-html.js";
 import { canonicalize, hashCanonicalExcluding } from "../shared/canonical.js";
 import { redact, redactDeep } from "../shared/redact.js";
 import { computeEnvDigest } from "../evidence/runner.js";
-export const GENESIS_VERSION = "0.3.0";
+export const GENESIS_VERSION = "0.4.0";
 export const BUNDLE_DIGEST_VERSION = 2;
 export function buildManifest(spec, result, options = {}) {
     return {

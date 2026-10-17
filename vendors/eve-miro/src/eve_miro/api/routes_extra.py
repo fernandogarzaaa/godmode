@@ -19,6 +19,7 @@ from eve_miro.api.state import WorldRecord
 from eve_miro.core.experience.candidates import ExperienceCandidate
 from eve_miro.core.experience.engine import get_experience_engine
 from eve_miro.core.simulation.engine import StubSimulationEngine
+from eve_miro.providers.common import fixture_mode
 from eve_miro.core.world.events import ProvenanceKind
 from eve_miro.core.world.projector import project_world_state
 from eve_miro.core.world.provenance import ProvenanceGraph
@@ -48,7 +49,7 @@ class DemoBody(BaseModel):
     region: str = "philippines"
     information_cutoff: str = "2026-08-31T10:00:00Z"
     scenario: str = "typhoon_manila_001"
-    population: int = 200
+    population: int = Field(default=200, ge=1, le=10_000)
     providers: list[str] = Field(default_factory=lambda: ["openmeteo", "usgs"])
 
 
@@ -266,30 +267,40 @@ class ExperimentRunBody(BaseModel):
 @router.post("/experiments/run")
 async def run_experiment(body: ExperimentRunBody | None = None):
     """Closed loop: WorldState(t0) → sim → EVE → score vs WorldState(t1)."""
-    import os
-
     from eve_miro.core.orchestration.closed_loop import ClosedLoop, split_at_cutoff
     from eve_miro.core.orchestration.experiment import load_experiment, parse_horizon
-    from eve_miro.providers.common import load_fixture
     from eve_miro.providers.weather import OpenMeteoProvider
 
     payload = body or ExperimentRunBody()
-    spec = load_experiment(payload.experiment)
+    exp = payload.experiment
+    # Only bundled experiment ids are accepted over HTTP: load_experiment()
+    # also takes filesystem paths (for the CLI), which let any caller make
+    # the server open arbitrary files.
+    if not exp or "/" in exp or "\\" in exp or ".." in exp or ":" in exp:
+        raise HTTPException(status_code=400, detail="experiment must be a bundled experiment id, not a path")
+    try:
+        spec = load_experiment(exp)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail=f"experiment not found: {exp}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     provider = OpenMeteoProvider(mode="archive")
-    if payload.use_fixtures:
-        os.environ.setdefault("FIXTURES", "1")
-        events = provider.normalize(load_fixture("openmeteo_manila_archive.json"))
-    else:
-        from eve_miro.config import TimeWindow as CfgWindow
+    from eve_miro.config import TimeWindow as CfgWindow
 
-        # Live Open-Meteo: OPENMETEO_LIVE=1 or LIVE=1 or FIXTURES=0. Fail closed.
-        os.environ.setdefault("OPENMETEO_LIVE", "1")
-        cutoff = spec.cutoff
-        window = CfgWindow(
-            start=cutoff.strftime("%Y-%m-%dT00:00:00Z") if hasattr(cutoff, "strftime") else str(cutoff),
-            end="2024-11-03T23:00:00Z",
-        )
-        events = await provider.fetch(window)
+    cutoff = spec.cutoff
+    window = CfgWindow(
+        start=cutoff.strftime("%Y-%m-%dT00:00:00Z"),
+        end="2024-11-03T23:00:00Z",
+    )
+    try:
+        with fixture_mode(payload.use_fixtures):
+            events = await provider.fetch(window)
+    except Exception as exc:
+        from eve_miro.errors import ProviderError
+
+        if isinstance(exc, ProviderError):
+            raise HTTPException(status_code=502, detail=f"live provider failed: {exc}") from exc
+        raise
     t0, t1 = split_at_cutoff(events, spec.cutoff)
     loop = ClosedLoop(ledger=app_state.STATE.ledger, graph=app_state.STATE.experience_graph)
     result = await loop.run(

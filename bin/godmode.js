@@ -82,7 +82,7 @@ if (!cmd) {
   if (out?.resultType !== "complete" || out?.structuredContent?.ok === false) process.exitCode = 1;
 } else if (cmd === "doctor") {
   const checks = [
-    ["node>=20", Number(process.versions.node.split(".")[0]) >= 20],
+    ["node>=22", Number(process.versions.node.split(".")[0]) >= 22],
     ["vendors/genesis", existsSync(join(root, "vendors/genesis/src/cli"))],
     ["vendors/eve", existsSync(join(root, "vendors/eve/src/cli"))],
     ["vendors/adam", existsSync(join(root, "vendors/adam/crates"))],

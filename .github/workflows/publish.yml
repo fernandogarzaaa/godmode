@@ -38,7 +38,7 @@ jobs:
           ref: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 22
           registry-url: "https://registry.npmjs.org"
 
       # A mutable ref (main, a branch, a short SHA) must never reach the

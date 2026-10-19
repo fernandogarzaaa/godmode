@@ -10,8 +10,8 @@
  * Run directly with `eve-mcp` (see bin/eve-mcp.js) or `node dist/mcp/server.js`.
  */
 import { createRequire } from "node:module";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { ApplicationMapSchema, BenchmarkSchema, CalibrateSchema, CompareBuildsSchema, EvaluateConversationSchema, EveBenchSchema, GetReportSchema, ListSchema, MultimodalScanSchema, ReadArtifactSchema, ResponseFormat, RunSessionSchema, RunUsabilityStudySchema, TwinSessionSchema, } from "./schemas.js";
 import { compareBuilds, getReport, listCulturesTool, listPersonasTool, listProfessionsTool, runApplicationMap, runBenchmark, runCalibrate, runEvaluateConversation, runEveBenchTool, runMultimodalScan, runPredictUX, runProductReport, runReadArtifact, runSession, runTwinSessionTool, runUsabilityStudy, runUserStudy, ToolInputError, } from "./tools.js";
 const require = createRequire(import.meta.url);

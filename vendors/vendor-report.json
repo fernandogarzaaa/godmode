@@ -25,7 +25,7 @@
         "LICENSE",
         ".claude-plugin"
       ],
-      "sha": "864f3de6bd3359b7c10965b9a9c50e115d433c39"
+      "sha": "8871e2988f3dab4bab029aa8e3c131172daa826a"
     },
     {
       "dest": "vendors/eve",
@@ -127,5 +127,5 @@
       "sha": "5755aa00a95d66d5c24272713f2215da6f7f276b"
     }
   ],
-  "at": "2026-10-12T15:55:32.266Z"
+  "at": "2026-10-20T07:38:06.735Z"
 }

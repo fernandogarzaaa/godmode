@@ -15,7 +15,7 @@ import { getSuite, suiteNames } from "../assurance/suites/index.js";
 import { ALL_DESCRIPTORS } from "../assurance/findings.js";
 import { VerifierAdapter } from "../assurance/verifier.js";
 import { SubprocessRunner } from "../evidence/runner.js";
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 /** Load the Ledger class, or throw a clear error if better-sqlite3 is unavailable. */
 async function loadLedger() {
     try {

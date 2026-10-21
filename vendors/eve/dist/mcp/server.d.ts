@@ -9,7 +9,7 @@
  *
  * Run directly with `eve-mcp` (see bin/eve-mcp.js) or `node dist/mcp/server.js`.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 export declare function createServer(): McpServer;
 /** Start the server over stdio. */
 /**

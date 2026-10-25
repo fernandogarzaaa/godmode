@@ -38,6 +38,9 @@
     "yaml": "^2.4.0",
     "zod": "^4.6.5"
   },
+  "overrides": {
+    "hono": "^4.13.13"
+  },
   "mcp": {
     "protocolVersion": "2026-07-28",
     "server": {

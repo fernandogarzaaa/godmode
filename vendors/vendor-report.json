@@ -1,6 +1,33 @@
 {
   "jobs": [
     {
+      "dest": "vendors/genesis",
+      "status": "ok",
+      "copied": [
+        "src",
+        "bin",
+        "adapters",
+        "benchmarks",
+        "templates",
+        "fixtures",
+        "examples",
+        "tests",
+        "docs",
+        "plugins",
+        "tools",
+        "package.json",
+        "package-lock.json",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "biome.json",
+        "vitest.config.ts",
+        "README.md",
+        "LICENSE",
+        ".claude-plugin"
+      ],
+      "sha": "697f125ee7bb2caf19041b0270ba4a34e7cd50f8"
+    },
+    {
       "dest": "vendors/eve",
       "status": "ok",
       "copied": [
@@ -64,7 +91,7 @@
         "CHANGELOG.md",
         ".github"
       ],
-      "sha": "cc497817445c166950c27002730f7b682d4b21e7"
+      "sha": "d9d233187c7a202fdb09f33719b0e9cfeaf40d87"
     },
     {
       "dest": "vendors/eve-miro",
@@ -100,5 +127,5 @@
       "sha": "eb734306155ee5f977ade9962501d1548ec66ee7"
     }
   ],
-  "at": "2026-10-21T03:11:48.902Z"
+  "at": "2026-10-25T11:14:35.171Z"
 }

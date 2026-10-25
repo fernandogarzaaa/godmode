@@ -97,10 +97,14 @@ if (!cmd) {
   const { adamBinaryStatus } = await import("../src/adam-client.js");
   const a = adamBinaryStatus();
   console.log((a.bin ? "ok  " : "warn") + "  adam-mcp for " + process.platform + "-" + process.arch + (a.bin ? "" : " — " + a.detail + " (memory/beliefs/genome tools unavailable)"));
-  for (const dep of ["pngjs", "better-sqlite3"]) {
-    let ok = true; try { await import(dep); } catch { ok = false; }
-    console.log((ok ? "ok  " : "warn") + "  " + dep + (ok ? "" : dep === "pngjs" ? " — EVE runs will fail; npm install" : " — Genesis ledger disabled; npm install better-sqlite3"));
-  }
+  let pngOk = true; try { await import("pngjs"); } catch { pngOk = false; }
+  console.log((pngOk ? "ok  " : "warn") + "  pngjs" + (pngOk ? "" : " — EVE runs will fail; npm install"));
+  // The ledger backend is not optional in effect: a missing better-sqlite3
+  // silently disables the hash-chained audit ledger, so doctor fails loudly
+  // instead of only warning (godmode-002).
+  let ledgerOk = true; try { await import("better-sqlite3"); } catch { ledgerOk = false; }
+  console.log((ledgerOk ? "ok  " : "FAIL") + "  better-sqlite3" + (ledgerOk ? "" : " — Genesis ledger disabled; npm install better-sqlite3"));
+  if (!ledgerOk) fail++;
   process.exit(fail ? 1 : 0);
 } else if (cmd === "mods") {
   console.log("mods: mods/policy-gates (enabled) — see godmode.config.yaml; toggle via mods/<name>/mod.json {enabled}");

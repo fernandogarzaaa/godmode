@@ -1,6 +1,33 @@
 {
   "jobs": [
     {
+      "dest": "vendors/genesis",
+      "status": "ok",
+      "copied": [
+        "src",
+        "bin",
+        "adapters",
+        "benchmarks",
+        "templates",
+        "fixtures",
+        "examples",
+        "tests",
+        "docs",
+        "plugins",
+        "tools",
+        "package.json",
+        "package-lock.json",
+        "tsconfig.json",
+        "tsconfig.build.json",
+        "biome.json",
+        "vitest.config.ts",
+        "README.md",
+        "LICENSE",
+        ".claude-plugin"
+      ],
+      "sha": "21fecc21e62629f37a721a5bc30a4787561df38e"
+    },
+    {
       "dest": "vendors/eve",
       "status": "ok",
       "copied": [
@@ -64,7 +91,7 @@
         "CHANGELOG.md",
         ".github"
       ],
-      "sha": "cc497817445c166950c27002730f7b682d4b21e7"
+      "sha": "d9d233187c7a202fdb09f33719b0e9cfeaf40d87"
     },
     {
       "dest": "vendors/eve-miro",
@@ -97,8 +124,8 @@
         ".github",
         "mirofish[AGPL-3.0, see NOTICE.md]"
       ],
-      "sha": "eb734306155ee5f977ade9962501d1548ec66ee7"
+      "sha": "c5d017889dee45254af743d5397392f6648941ea"
     }
   ],
-  "at": "2026-10-21T03:11:48.902Z"
+  "at": "2026-10-26T03:03:53.406Z"
 }

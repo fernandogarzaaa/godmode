@@ -12,6 +12,10 @@ export interface EveConfig {
     browser: AdapterName;
     /** Device to emulate when browser is "mobile" (e.g. "iPhone 14"). */
     device?: string;
+    /** Path to the Rune app binary when browser is "rune". */
+    runeBinary?: string;
+    /** Directory for per-step Rune PNG/tree/journal records (post-run scoring). */
+    runeRecordDir?: string;
     headless: boolean;
     viewport: Viewport;
     goal?: string;

@@ -7,11 +7,13 @@ export { mergeNativeDialogs, recordNativeDialog, resolveNativeDialogHandling, } 
 export { PERCEPTION_SCRIPT } from "./perceptionScript.js";
 export { PlaywrightAdapter } from "./playwright.js";
 export { PuppeteerAdapter } from "./puppeteer.js";
+export { RuneAdapter } from "./rune.js";
 export { SeleniumAdapter } from "./selenium.js";
 import { MobileAdapter } from "./mobile.js";
 import { MockAdapter } from "./mock.js";
 import { PlaywrightAdapter } from "./playwright.js";
 import { PuppeteerAdapter } from "./puppeteer.js";
+import { RuneAdapter } from "./rune.js";
 import { SeleniumAdapter } from "./selenium.js";
 /** Factory used by the CLI and config loader. */
 export function createAdapter(name, options = {}) {
@@ -26,6 +28,8 @@ export function createAdapter(name, options = {}) {
             return new MobileAdapter(options);
         case "mock":
             return new MockAdapter();
+        case "rune":
+            return new RuneAdapter(options);
         default: {
             const exhaustive = name;
             throw new Error(`Unknown adapter "${String(exhaustive)}"`);

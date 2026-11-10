@@ -20,7 +20,14 @@ export const DEFAULT_CONFIG = {
     cognitive: false,
     utilityDecisions: false,
 };
-const ADAPTERS = ["playwright", "puppeteer", "selenium", "mobile", "mock"];
+const ADAPTERS = [
+    "playwright",
+    "puppeteer",
+    "selenium",
+    "mobile",
+    "mock",
+    "rune",
+];
 const STRATEGIES = ["curious", "systematic", "goal-directed"];
 /** Validate and normalize a raw (parsed-YAML or object) configuration. */
 export function resolveConfig(raw) {
@@ -50,6 +57,10 @@ export function resolveConfig(raw) {
         }
         config.device = device;
     }
+    if (input.runeBinary !== undefined)
+        config.runeBinary = expectString(input, "runeBinary");
+    if (input.runeRecordDir !== undefined)
+        config.runeRecordDir = expectString(input, "runeRecordDir");
     if (input.headless !== undefined)
         config.headless = expectBoolean(input, "headless");
     if (input.viewport !== undefined) {

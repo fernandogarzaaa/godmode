@@ -1,3 +1,4 @@
+import { textSourceOf } from "../observation/provenance.js";
 import { contrastRatio, decodePng, frameDiffRatio, luminanceVariance, parseHexColor, relativeLuminance, sampleLuminances, } from "./pixels.js";
 /* ------------------------------------------------------------------ */
 /* Geometry checks (no pixels needed)                                 */
@@ -94,6 +95,11 @@ export function checkGeometry(percept, accessibility) {
 function checkDeclaredContrast(percept, accessibility) {
     const issues = [];
     for (const el of percept.elements) {
+        // An accessibility-sourced label names a control no sighted human reads
+        // as text, so a contrast ratio on it is meaningless. The label is not
+        // rendered; there are no pixels to measure.
+        if (textSourceOf(el) === "accessibility")
+            continue;
         if (!el.text.trim() || el.text.trim().length < 3)
             continue;
         if (!el.color || !el.backgroundColor)
@@ -173,6 +179,11 @@ export function checkPixels(percept) {
     }
     // Pixel-sampled contrast for text elements without declared colors.
     for (const el of percept.elements) {
+        // Same rule as the declared-color path: an accessibility-sourced label
+        // is not rendered text, so sampling its box measures the control behind
+        // it, not the label. The hello app's switch label read 1.00:1 this way.
+        if (textSourceOf(el) === "accessibility")
+            continue;
         if (!el.text.trim() || el.text.trim().length < 4)
             continue;
         if (el.color && el.backgroundColor)

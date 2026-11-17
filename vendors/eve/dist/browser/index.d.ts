@@ -12,9 +12,11 @@ export { mergeNativeDialogs, recordNativeDialog, resolveNativeDialogHandling, } 
 export { PERCEPTION_SCRIPT } from "./perceptionScript.js";
 export { PlaywrightAdapter } from "./playwright.js";
 export { PuppeteerAdapter } from "./puppeteer.js";
+export type { RuneAdapterOptions } from "./rune.js";
+export { RuneAdapter } from "./rune.js";
 export { SeleniumAdapter } from "./selenium.js";
 import type { AdapterOptions, BrowserAdapter } from "./adapter.js";
-export type AdapterName = "playwright" | "puppeteer" | "selenium" | "mobile" | "mock";
+export type AdapterName = "playwright" | "puppeteer" | "selenium" | "mobile" | "mock" | "rune";
 /** Factory used by the CLI and config loader. */
 export declare function createAdapter(name: AdapterName, options?: AdapterOptions): BrowserAdapter;
 //# sourceMappingURL=index.d.ts.map
